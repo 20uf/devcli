@@ -6,14 +6,23 @@ Dynamically discovers clusters, services, tasks and containers — no static con
 
 ## Install
 
-### From GitHub Releases
+### One-liner (recommended)
 
-Download the latest binary from [Releases](https://github.com/20uf/devcli/releases) and place it in your `$PATH`.
+```bash
+curl -fsSL https://raw.githubusercontent.com/20uf/devcli/main/install.sh | sh
+```
+
+### Manual download
+
+Download the binary for your platform from [Releases](https://github.com/20uf/devcli/releases) and place it in your `$PATH`.
 
 ### From source
 
 ```bash
-go install github.com/20uf/devcli@latest
+git clone git@github.com:20uf/devcli.git
+cd devcli
+make build
+sudo mv devcli /usr/local/bin/
 ```
 
 ## Usage
