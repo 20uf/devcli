@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -13,14 +14,15 @@ import (
 )
 
 const (
-	repoOwner = "20uf"
-	repoName  = "devcli"
-	apiURL    = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
+	repoOwner   = "20uf"
+	repoName    = "devcli"
+	releasesURL = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases"
 )
 
 type githubRelease struct {
-	TagName string  `json:"tag_name"`
-	Assets  []asset `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	Prerelease bool    `json:"prerelease"`
+	Assets     []asset `json:"assets"`
 }
 
 type asset struct {
@@ -28,16 +30,24 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// Check queries GitHub for the latest release and returns whether an update is available.
-func Check(currentVersion string) (latestVersion string, hasUpdate bool, err error) {
-	resp, err := http.Get(apiURL)
+// Check queries GitHub for the most recent release and returns whether an update is available.
+// If preRelease is false, only stable releases are considered.
+func Check(currentVersion string, preRelease bool) (latestVersion string, hasUpdate bool, err error) {
+	if !preRelease {
+		return checkStable(currentVersion)
+	}
+	return checkAll(currentVersion)
+}
+
+func checkStable(currentVersion string) (string, bool, error) {
+	resp, err := http.Get(releasesURL + "/latest")
 	if err != nil {
 		return "", false, fmt.Errorf("failed to fetch latest release: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return "", false, fmt.Errorf("no stable release found (status %d)", resp.StatusCode)
 	}
 
 	var release githubRelease
@@ -45,17 +55,41 @@ func Check(currentVersion string) (latestVersion string, hasUpdate bool, err err
 		return "", false, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	latest := release.TagName
+	return compareVersions(currentVersion, release.TagName)
+}
+
+func checkAll(currentVersion string) (string, bool, error) {
+	resp, err := http.Get(releasesURL + "?per_page=1")
+	if err != nil {
+		return "", false, fmt.Errorf("failed to fetch releases: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var releases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return "", false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(releases) == 0 {
+		return "", false, fmt.Errorf("no releases found")
+	}
+
+	return compareVersions(currentVersion, releases[0].TagName)
+}
+
+func compareVersions(currentVersion, latestTag string) (string, bool, error) {
+	latest := ensureVPrefix(latestTag)
 	current := ensureVPrefix(currentVersion)
-	latest = ensureVPrefix(latest)
 
 	if !semver.IsValid(current) || !semver.IsValid(latest) {
-		// If versions are not valid semver, compare as strings
 		return strings.TrimPrefix(latest, "v"), current != latest, nil
 	}
 
-	hasUpdate = semver.Compare(current, latest) < 0
-
+	hasUpdate := semver.Compare(current, latest) < 0
 	return strings.TrimPrefix(latest, "v"), hasUpdate, nil
 }
 
@@ -83,7 +117,8 @@ func Apply(version string) error {
 }
 
 func fetchRelease(version string) (*githubRelease, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/v%s", repoOwner, repoName, version)
+	tag := ensureVPrefix(version)
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", repoOwner, repoName, tag)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err
@@ -91,7 +126,7 @@ func fetchRelease(version string) (*githubRelease, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("release v%s not found (status %d)", version, resp.StatusCode)
+		return nil, fmt.Errorf("release %s not found (status %d)", tag, resp.StatusCode)
 	}
 
 	var release githubRelease
@@ -135,6 +170,18 @@ func downloadAndReplace(url string) error {
 	}
 
 	if err := os.Rename(tmpFile.Name(), execPath); err != nil {
+		// Permission denied — retry with sudo
+		if os.IsPermission(err) {
+			fmt.Println("Permission denied, retrying with sudo...")
+			cmd := exec.Command("sudo", "mv", tmpFile.Name(), execPath)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if sudoErr := cmd.Run(); sudoErr != nil {
+				return fmt.Errorf("failed to replace binary with sudo: %w", sudoErr)
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to replace binary: %w", err)
 	}
 

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/20uf/devcli/internal/verbose"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
@@ -42,6 +43,7 @@ func NewClient(profile, region string) (*Client, error) {
 }
 
 func (c *Client) ListClusters(ctx context.Context) ([]string, error) {
+	verbose.Log("ecs:ListClusters")
 	var clusterArns []string
 	paginator := ecs.NewListClustersPaginator(c.ecs, &ecs.ListClustersInput{})
 
@@ -63,6 +65,7 @@ func (c *Client) ListClusters(ctx context.Context) ([]string, error) {
 }
 
 func (c *Client) ListServices(ctx context.Context, cluster string) ([]string, error) {
+	verbose.Log("ecs:ListServices cluster=%s", cluster)
 	var serviceArns []string
 	paginator := ecs.NewListServicesPaginator(c.ecs, &ecs.ListServicesInput{
 		Cluster: aws.String(cluster),
@@ -86,6 +89,7 @@ func (c *Client) ListServices(ctx context.Context, cluster string) ([]string, er
 }
 
 func (c *Client) GetRunningTask(ctx context.Context, cluster, service string) (string, error) {
+	verbose.Log("ecs:ListTasks cluster=%s service=%s status=RUNNING", cluster, service)
 	resp, err := c.ecs.ListTasks(ctx, &ecs.ListTasksInput{
 		Cluster:       aws.String(cluster),
 		ServiceName:   aws.String(service),
@@ -104,6 +108,7 @@ func (c *Client) GetRunningTask(ctx context.Context, cluster, service string) (s
 }
 
 func (c *Client) ListContainers(ctx context.Context, cluster, taskID string) ([]string, error) {
+	verbose.Log("ecs:DescribeTasks cluster=%s task=%s", cluster, taskID)
 	resp, err := c.ecs.DescribeTasks(ctx, &ecs.DescribeTasksInput{
 		Cluster: aws.String(cluster),
 		Tasks:   []string{taskID},
@@ -127,7 +132,7 @@ func (c *Client) ListContainers(ctx context.Context, cluster, taskID string) ([]
 	return names, nil
 }
 
-func (c *Client) ExecInteractive(ctx context.Context, cluster, taskID, container, command string) error {
+func (c *Client) ExecInteractive(ctx context.Context, cluster, taskID, container, command, profile string) error {
 	args := []string{"ecs", "execute-command",
 		"--cluster", cluster,
 		"--task", taskID,
@@ -136,14 +141,14 @@ func (c *Client) ExecInteractive(ctx context.Context, cluster, taskID, container
 		"--interactive",
 	}
 
-	if c.profile != "" {
-		args = append(args, "--profile", c.profile)
+	if profile != "" {
+		args = append(args, "--profile", profile)
 	}
 	if c.region != "" {
 		args = append(args, "--region", c.region)
 	}
 
-	cmd := exec.CommandContext(ctx, "aws", args...)
+	cmd := verbose.Cmd(exec.CommandContext(ctx, "aws", args...))
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

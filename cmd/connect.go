@@ -2,10 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/20uf/devcli/internal/ecs"
-	"github.com/20uf/devcli/internal/ui"
+	awsutil "github.com/20uf/devcli/internal/aws"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +19,14 @@ var (
 var connectCmd = &cobra.Command{
 	Use:   "connect",
 	Short: "Connect to an ECS container interactively",
-	Long:  "Discover ECS clusters, services, tasks and containers dynamically, then open an interactive shell.",
-	RunE:  runConnect,
+	Long: `Discover ECS clusters, services, tasks and containers dynamically, then open an interactive shell.
+
+Examples:
+  devcli connect                                         Interactive selection
+  devcli connect --profile dev --cluster my-cluster      Partial flags
+  devcli connect --profile dev --cluster c --service s   Full non-interactive
+  devcli connect --shell /bin/bash                       Custom shell`,
+	RunE: runConnect,
 }
 
 func init() {
@@ -36,125 +40,17 @@ func init() {
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
-	client, err := ecs.NewClient(flagProfile, flagRegion)
-	if err != nil {
-		return fmt.Errorf("failed to create AWS client: %w", err)
-	}
-
-	// 1. Select cluster
-	cluster, err := selectCluster(client)
-	if err != nil {
+	if err := awsutil.CheckDependencies(); err != nil {
 		return err
 	}
 
-	// 2. Select service
-	service, err := selectService(client, cluster)
+	// Create handler (wires all dependencies: domain + repos + UI)
+	handler, err := NewConnectHandler(cmd.Context(), flagProfile, flagRegion)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initialize connection handler: %w", err)
 	}
 
-	// 3. Get a running task
-	task, err := client.GetRunningTask(cmd.Context(), cluster, service)
-	if err != nil {
-		return fmt.Errorf("no running task found: %w", err)
-	}
-
-	// 4. Select container
-	container, err := selectContainer(client, cmd, cluster, task)
-	if err != nil {
-		return err
-	}
-
-	// 5. Determine shell
-	shell := resolveShell()
-
-	// 6. Execute
-	fmt.Printf("Connecting to %s/%s/%s (%s)...\n", cluster, service, container, shell)
-	return client.ExecInteractive(cmd.Context(), cluster, task, container, shell)
-}
-
-func selectCluster(client *ecs.Client) (string, error) {
-	if flagCluster != "" {
-		return flagCluster, nil
-	}
-
-	clusters, err := client.ListClusters(rootCmd.Context())
-	if err != nil {
-		return "", fmt.Errorf("failed to list clusters: %w", err)
-	}
-
-	if len(clusters) == 0 {
-		return "", fmt.Errorf("no ECS clusters found")
-	}
-
-	selected, err := ui.Select("Select cluster", clusters)
-	if err != nil {
-		os.Exit(0)
-	}
-
-	return selected, nil
-}
-
-func selectService(client *ecs.Client, cluster string) (string, error) {
-	if flagService != "" {
-		return flagService, nil
-	}
-
-	services, err := client.ListServices(rootCmd.Context(), cluster)
-	if err != nil {
-		return "", fmt.Errorf("failed to list services: %w", err)
-	}
-
-	if len(services) == 0 {
-		return "", fmt.Errorf("no services found in cluster %s", cluster)
-	}
-
-	selected, err := ui.Select("Select service", services)
-	if err != nil {
-		os.Exit(0)
-	}
-
-	return selected, nil
-}
-
-func selectContainer(client *ecs.Client, cmd *cobra.Command, cluster, task string) (string, error) {
-	if flagContainer != "" {
-		return flagContainer, nil
-	}
-
-	containers, err := client.ListContainers(cmd.Context(), cluster, task)
-	if err != nil {
-		return "", fmt.Errorf("failed to list containers: %w", err)
-	}
-
-	if len(containers) == 0 {
-		return "", fmt.Errorf("no containers found in task %s", task)
-	}
-
-	// Auto-select "php" if present
-	for _, c := range containers {
-		if c == "php" {
-			fmt.Println("Auto-selected container: php")
-			return "php", nil
-		}
-	}
-
-	if len(containers) == 1 {
-		fmt.Printf("Auto-selected container: %s\n", containers[0])
-		return containers[0], nil
-	}
-
-	selected, err := ui.Select("Select container", containers)
-	if err != nil {
-		os.Exit(0)
-	}
-
-	return selected, nil
-}
-
-func resolveShell() string {
-	if flagShell != "" {
-		return flagShell
-	}
-	return "su -s /bin/sh www-data"
+	// Orchestrate the connection flow
+	// Handler manages: cluster selection → service → task → container → execution
+	return handler.Handle(cmd, flagCluster, flagService, flagContainer, flagShell)
 }
