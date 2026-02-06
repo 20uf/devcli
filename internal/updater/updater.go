@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	repoOwner = "20uf"
-	repoName  = "devcli"
-	apiURL    = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
+	repoOwner  = "20uf"
+	repoName   = "devcli"
+	releasesURL = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases"
 )
 
 type githubRelease struct {
@@ -28,11 +28,11 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// Check queries GitHub for the latest release and returns whether an update is available.
+// Check queries GitHub for the most recent release (including pre-releases) and returns whether an update is available.
 func Check(currentVersion string) (latestVersion string, hasUpdate bool, err error) {
-	resp, err := http.Get(apiURL)
+	resp, err := http.Get(releasesURL + "?per_page=1")
 	if err != nil {
-		return "", false, fmt.Errorf("failed to fetch latest release: %w", err)
+		return "", false, fmt.Errorf("failed to fetch releases: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -40,17 +40,19 @@ func Check(currentVersion string) (latestVersion string, hasUpdate bool, err err
 		return "", false, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 	}
 
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	var releases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return "", false, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	latest := release.TagName
+	if len(releases) == 0 {
+		return "", false, fmt.Errorf("no releases found")
+	}
+
+	latest := ensureVPrefix(releases[0].TagName)
 	current := ensureVPrefix(currentVersion)
-	latest = ensureVPrefix(latest)
 
 	if !semver.IsValid(current) || !semver.IsValid(latest) {
-		// If versions are not valid semver, compare as strings
 		return strings.TrimPrefix(latest, "v"), current != latest, nil
 	}
 

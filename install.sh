@@ -27,9 +27,9 @@ case "$OS" in
     ;;
 esac
 
-# Get latest version from GitHub API
+# Get latest version from GitHub API (includes pre-releases)
 echo "Fetching latest release..."
-LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
 
 if [ -z "$LATEST" ]; then
   echo "Failed to fetch latest version" >&2
