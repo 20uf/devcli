@@ -41,3 +41,4 @@ release:
   github:
     owner: 20uf
     name: devcli
+  prerelease: auto
