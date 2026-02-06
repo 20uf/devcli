@@ -1,0 +1,153 @@
+package updater
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"runtime"
+	"strings"
+
+	"golang.org/x/mod/semver"
+)
+
+const (
+	repoOwner = "20uf"
+	repoName  = "devcli"
+	apiURL    = "https://api.github.com/repos/" + repoOwner + "/" + repoName + "/releases/latest"
+)
+
+type githubRelease struct {
+	TagName string  `json:"tag_name"`
+	Assets  []asset `json:"assets"`
+}
+
+type asset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+}
+
+// Check queries GitHub for the latest release and returns whether an update is available.
+func Check(currentVersion string) (latestVersion string, hasUpdate bool, err error) {
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to fetch latest release: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+	}
+
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	latest := release.TagName
+	current := ensureVPrefix(currentVersion)
+	latest = ensureVPrefix(latest)
+
+	if !semver.IsValid(current) || !semver.IsValid(latest) {
+		// If versions are not valid semver, compare as strings
+		return strings.TrimPrefix(latest, "v"), current != latest, nil
+	}
+
+	hasUpdate = semver.Compare(current, latest) < 0
+
+	return strings.TrimPrefix(latest, "v"), hasUpdate, nil
+}
+
+// Apply downloads and replaces the current binary with the specified version.
+func Apply(version string) error {
+	release, err := fetchRelease(version)
+	if err != nil {
+		return err
+	}
+
+	assetName := buildAssetName()
+	var downloadURL string
+	for _, a := range release.Assets {
+		if a.Name == assetName {
+			downloadURL = a.BrowserDownloadURL
+			break
+		}
+	}
+
+	if downloadURL == "" {
+		return fmt.Errorf("no asset found for %s/%s (%s)", runtime.GOOS, runtime.GOARCH, assetName)
+	}
+
+	return downloadAndReplace(downloadURL)
+}
+
+func fetchRelease(version string) (*githubRelease, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/v%s", repoOwner, repoName, version)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("release v%s not found (status %d)", version, resp.StatusCode)
+	}
+
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+
+	return &release, nil
+}
+
+func downloadAndReplace(url string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download returned status %d", resp.StatusCode)
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "devcli-update-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to write update: %w", err)
+	}
+	tmpFile.Close()
+
+	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
+		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+
+	if err := os.Rename(tmpFile.Name(), execPath); err != nil {
+		return fmt.Errorf("failed to replace binary: %w", err)
+	}
+
+	return nil
+}
+
+func buildAssetName() string {
+	return fmt.Sprintf("devcli_%s_%s", runtime.GOOS, runtime.GOARCH)
+}
+
+func ensureVPrefix(v string) string {
+	if !strings.HasPrefix(v, "v") {
+		return "v" + v
+	}
+	return v
+}

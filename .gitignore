@@ -1,0 +1,4 @@
+dist/
+devcli
+*.exe
+.DS_Store
