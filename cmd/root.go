@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/20uf/devcli/internal/ui"
 	"github.com/20uf/devcli/internal/updater"
 	"github.com/spf13/cobra"
 )
@@ -12,7 +13,20 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "devcli",
 	Short: "CLI for interactive access to AWS ECS containers",
-	Long:  "A developer CLI to dynamically discover and connect to AWS ECS Fargate containers.",
+	Long: `A developer CLI to dynamically discover and connect to AWS ECS Fargate containers.
+
+Available commands:
+  connect       Connect to an ECS container interactively
+  deploy        Trigger a GitHub Actions deployment workflow
+  update        Update devcli to the latest version
+  version       Print version information
+  completion    Generate or install shell completion
+
+Use "devcli <command> --help" for more information about a command.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		ui.PrintBanner(appVersion)
+		cmd.Help() //nolint:errcheck
+	},
 }
 
 var (
@@ -44,8 +58,6 @@ func Execute() {
 }
 
 func checkForUpdate() {
-	// Check pre-releases first (since we're likely on a pre-release),
-	// then stable releases
 	latest, hasUpdate, err := updater.Check(appVersion, true)
 	if err != nil || !hasUpdate {
 		return
@@ -53,8 +65,11 @@ func checkForUpdate() {
 
 	updateOnce.Do(func() {
 		updateNotice = fmt.Sprintf(
-			"\nA new version of devcli is available: %s (current: %s)\nRun \"devcli update --pre-release\" to update.\n",
-			latest, appVersion,
+			"\n%s %s → %s\n%s\n",
+			ui.WarningStyle.Render("Update available:"),
+			ui.MutedStyle.Render(appVersion),
+			ui.SuccessStyle.Render(latest),
+			ui.MutedStyle.Render("Run \"devcli update --pre-release\" to update."),
 		)
 	})
 }
