@@ -174,69 +174,101 @@ func executeDeployFromHistory(entry *history.Entry) error {
 	return nil
 }
 
+func listReposForOwner(owner string) []string {
+	args := []string{"repo", "list", "--json", "nameWithOwner", "--limit", "100", "-q", ".[].nameWithOwner"}
+	if owner != "" {
+		args = append(args, owner)
+	}
+	out, err := exec.Command("gh", args...).Output()
+	if err != nil {
+		return nil
+	}
+	var repos []string
+	for _, r := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			repos = append(repos, r)
+		}
+	}
+	return repos
+}
+
+func listOwners() []string {
+	// Get current user
+	userOut, err := exec.Command("gh", "api", "user", "--jq", ".login").Output()
+	if err != nil {
+		return nil
+	}
+	user := strings.TrimSpace(string(userOut))
+
+	owners := []string{user}
+
+	// Get organizations
+	orgsOut, err := exec.Command("gh", "api", "user/orgs", "--jq", ".[].login").Output()
+	if err == nil {
+		for _, org := range strings.Split(strings.TrimSpace(string(orgsOut)), "\n") {
+			org = strings.TrimSpace(org)
+			if org != "" {
+				owners = append(owners, org)
+			}
+		}
+	}
+
+	return owners
+}
+
 func selectRepo() (string, error) {
 	if flagRepo != "" {
 		return flagRepo, nil
 	}
 
 	// Try to detect from current git repo
+	var currentRepo string
 	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
 	if err == nil {
-		currentRepo := strings.TrimSpace(string(out))
-		if currentRepo != "" {
-			ui.PrintStep("◆", fmt.Sprintf("Detected repository: %s", currentRepo))
+		currentRepo = strings.TrimSpace(string(out))
+	}
 
-			// List user's repos for selection
-			reposOut, err := exec.Command("gh", "repo", "list", "--json", "nameWithOwner", "--limit", "50", "-q", ".[].nameWithOwner").Output()
-			if err == nil {
-				repos := strings.Split(strings.TrimSpace(string(reposOut)), "\n")
-				if len(repos) > 1 {
-					// Put current repo first
-					options := []string{currentRepo + " (current)"}
-					for _, r := range repos {
-						r = strings.TrimSpace(r)
-						if r != "" && r != currentRepo {
-							options = append(options, r)
-						}
-					}
+	// List owners (user + orgs)
+	owners := listOwners()
 
-					selected, err := ui.Select("Select repository", options)
-					if err != nil {
-						os.Exit(0)
-					}
+	// Select owner first
+	var selectedOwner string
+	if len(owners) > 1 {
+		selected, err := ui.Select("Select owner", owners)
+		if err != nil {
+			os.Exit(0)
+		}
+		selectedOwner = selected
+	} else if len(owners) == 1 {
+		selectedOwner = owners[0]
+	}
 
-					return strings.TrimSuffix(selected, " (current)"), nil
-				}
+	// List repos for the selected owner
+	repos := listReposForOwner(selectedOwner)
+	if len(repos) == 0 {
+		return "", fmt.Errorf("no repositories found for %s. Use --repo owner/repo", selectedOwner)
+	}
+
+	// Put current repo first if it belongs to the selected owner
+	var options []string
+	if currentRepo != "" && strings.HasPrefix(currentRepo, selectedOwner+"/") {
+		options = append(options, currentRepo+" (current)")
+		for _, r := range repos {
+			if r != currentRepo {
+				options = append(options, r)
 			}
-			return currentRepo, nil
 		}
+	} else {
+		options = repos
 	}
 
-	// Fallback: list user's repos
-	reposOut, err := exec.Command("gh", "repo", "list", "--json", "nameWithOwner", "--limit", "50", "-q", ".[].nameWithOwner").Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to list repositories: %w", err)
-	}
-
-	repos := strings.Split(strings.TrimSpace(string(reposOut)), "\n")
-	var cleaned []string
-	for _, r := range repos {
-		r = strings.TrimSpace(r)
-		if r != "" {
-			cleaned = append(cleaned, r)
-		}
-	}
-
-	if len(cleaned) == 0 {
-		return "", fmt.Errorf("no repositories found. Use --repo owner/repo")
-	}
-
-	selected, err := ui.Select("Select repository", cleaned)
+	selected, err := ui.Select("Select repository", options)
 	if err != nil {
 		os.Exit(0)
 	}
 
-	return selected, nil
+	return strings.TrimSuffix(selected, " (current)"), nil
 }
 
 func selectDeployWorkflow(repo string) (fileName, displayName string, err error) {
