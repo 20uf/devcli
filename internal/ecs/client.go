@@ -127,7 +127,7 @@ func (c *Client) ListContainers(ctx context.Context, cluster, taskID string) ([]
 	return names, nil
 }
 
-func (c *Client) ExecInteractive(ctx context.Context, cluster, taskID, container, command string) error {
+func (c *Client) ExecInteractive(ctx context.Context, cluster, taskID, container, command, profile string) error {
 	args := []string{"ecs", "execute-command",
 		"--cluster", cluster,
 		"--task", taskID,
@@ -136,8 +136,8 @@ func (c *Client) ExecInteractive(ctx context.Context, cluster, taskID, container
 		"--interactive",
 	}
 
-	if c.profile != "" {
-		args = append(args, "--profile", c.profile)
+	if profile != "" {
+		args = append(args, "--profile", profile)
 	}
 	if c.region != "" {
 		args = append(args, "--region", c.region)

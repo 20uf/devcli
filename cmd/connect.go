@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	awsutil "github.com/20uf/devcli/internal/aws"
 	"github.com/20uf/devcli/internal/ecs"
 	"github.com/20uf/devcli/internal/ui"
 	"github.com/spf13/cobra"
@@ -36,7 +37,13 @@ func init() {
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
-	client, err := ecs.NewClient(flagProfile, flagRegion)
+	// Select AWS profile if not provided
+	profile, err := selectProfile()
+	if err != nil {
+		return err
+	}
+
+	client, err := ecs.NewClient(profile, flagRegion)
 	if err != nil {
 		return fmt.Errorf("failed to create AWS client: %w", err)
 	}
@@ -70,7 +77,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 
 	// 6. Execute
 	fmt.Printf("Connecting to %s/%s/%s (%s)...\n", cluster, service, container, shell)
-	return client.ExecInteractive(cmd.Context(), cluster, task, container, shell)
+	return client.ExecInteractive(cmd.Context(), cluster, task, container, shell, profile)
 }
 
 func selectCluster(client *ecs.Client) (string, error) {
@@ -145,6 +152,33 @@ func selectContainer(client *ecs.Client, cmd *cobra.Command, cluster, task strin
 	}
 
 	selected, err := ui.Select("Select container", containers)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	return selected, nil
+}
+
+func selectProfile() (string, error) {
+	if flagProfile != "" {
+		return flagProfile, nil
+	}
+
+	profiles, err := awsutil.ListProfiles()
+	if err != nil {
+		return "", fmt.Errorf("failed to list AWS profiles: %w", err)
+	}
+
+	if len(profiles) == 0 {
+		return "", fmt.Errorf("no AWS profiles found in ~/.aws/config")
+	}
+
+	if len(profiles) == 1 {
+		fmt.Printf("Using AWS profile: %s\n", profiles[0])
+		return profiles[0], nil
+	}
+
+	selected, err := ui.Select("Select AWS profile", profiles)
 	if err != nil {
 		os.Exit(0)
 	}
