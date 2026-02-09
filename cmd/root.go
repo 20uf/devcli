@@ -12,20 +12,10 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "devcli",
-	Short: "CLI for interactive access to AWS ECS containers",
-	Long: `A developer CLI to dynamically discover and connect to AWS ECS Fargate containers.
-
-Available commands:
-  connect       Connect to an ECS container interactively
-  deploy        Trigger a GitHub Actions deployment workflow
-  update        Update devcli to the latest version
-  version       Print version information
-  completion    Generate or install shell completion
-
-Use "devcli <command> --help" for more information about a command.`,
+	Short: "Focus on coding, not on tooling.",
+	Long:  `Devcli is a modular CLI toolbox to manage your dev environment, workflows, and infrastructure interactions.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.PrintBanner(appVersion)
-		cmd.Help() //nolint:errcheck
 	},
 }
 
