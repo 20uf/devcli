@@ -9,7 +9,11 @@ Dynamically discovers clusters, services, tasks and containers — no static con
 ### One-liner (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/20uf/devcli/main/install.sh | sh
+# Stable release
+curl -fsSL https://raw.githubusercontent.com/20uf/devcli/main/install.sh | sh -s
+
+# Pre-release (alpha, beta, rc)
+curl -fsSL https://raw.githubusercontent.com/20uf/devcli/main/install.sh | sh -s -- --pre-release
 ```
 
 ### Manual download
@@ -66,7 +70,11 @@ devcli connect --profile my-sso-profile --region eu-west-1
 ### Update
 
 ```bash
+# Update to latest stable
 devcli update
+
+# Update to latest pre-release
+devcli update --pre-release
 ```
 
 ### Version
