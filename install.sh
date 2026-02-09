@@ -45,7 +45,7 @@ if [ -n "$EXISTING" ]; then
   CURRENT_VERSION=$("$EXISTING" version 2>/dev/null | awk '{print $2}' || echo "unknown")
   echo "${BINARY} is already installed: ${CURRENT_VERSION} (${EXISTING})"
   printf "Reinstall/upgrade? [y/N] "
-  read -r REPLY
+  read -r REPLY < /dev/tty
   case "$REPLY" in
     [yY]|[yY][eE][sS]) ;;
     *)
