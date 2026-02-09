@@ -39,6 +39,22 @@ case "$OS" in
     ;;
 esac
 
+# Check if already installed
+EXISTING=$(command -v "$BINARY" 2>/dev/null || true)
+if [ -n "$EXISTING" ]; then
+  CURRENT_VERSION=$("$EXISTING" version 2>/dev/null | awk '{print $2}' || echo "unknown")
+  echo "${BINARY} is already installed: ${CURRENT_VERSION} (${EXISTING})"
+  printf "Reinstall/upgrade? [y/N] "
+  read -r REPLY
+  case "$REPLY" in
+    [yY]|[yY][eE][sS]) ;;
+    *)
+      echo "Aborted."
+      exit 0
+      ;;
+  esac
+fi
+
 # Get version from GitHub API
 echo "Fetching latest release..."
 if [ "$PRE_RELEASE" = true ]; then
