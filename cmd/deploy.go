@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/20uf/devcli/internal/history"
 	"github.com/20uf/devcli/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -16,20 +18,31 @@ var (
 	flagWorkflow string
 	flagBranch   string
 	flagInputs   []string
+	flagWatch    bool
+	flagLast     bool
 )
 
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Trigger a GitHub Actions deployment workflow",
-	Long:  "List and trigger GitHub Actions workflows via the gh CLI.",
-	RunE:  runDeploy,
+	Long: `Trigger a GitHub Actions deployment workflow via the gh CLI.
+
+Examples:
+  devcli deploy                                          Interactive selection
+  devcli deploy --last                                   Replay last deployment
+  devcli deploy --repo owner/repo --workflow deploy.yml  Non-interactive
+  devcli deploy --branch feature-x --watch               Deploy and stream logs
+  devcli deploy --input environment=prod --input v=1.2   With workflow inputs`,
+	RunE: runDeploy,
 }
 
 func init() {
 	deployCmd.Flags().StringVar(&flagRepo, "repo", "", "GitHub repository (owner/repo)")
-	deployCmd.Flags().StringVar(&flagWorkflow, "workflow", "", "Workflow file name or ID (skip selection)")
-	deployCmd.Flags().StringVar(&flagBranch, "branch", "", "Branch to run the workflow on (default: main)")
-	deployCmd.Flags().StringSliceVar(&flagInputs, "input", nil, "Workflow inputs as key=value pairs")
+	deployCmd.Flags().StringVar(&flagWorkflow, "workflow", "", "Workflow file name or ID")
+	deployCmd.Flags().StringVar(&flagBranch, "branch", "", "Branch to run the workflow on")
+	deployCmd.Flags().StringSliceVar(&flagInputs, "input", nil, "Workflow inputs (key=value)")
+	deployCmd.Flags().BoolVar(&flagWatch, "watch", false, "Watch workflow run and stream logs")
+	deployCmd.Flags().BoolVar(&flagLast, "last", false, "Replay last deployment")
 	rootCmd.AddCommand(deployCmd)
 }
 
@@ -46,32 +59,280 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("GitHub CLI (gh) is required.\n  Install: https://cli.github.com/")
 	}
 
-	// Determine repo
-	repo, err := resolveRepo()
+	// Load history
+	hist, _ := history.Load()
+
+	// Replay last deployment
+	if flagLast && hist != nil {
+		return replayLast(hist)
+	}
+
+	// Show history if no flags provided
+	if flagRepo == "" && flagWorkflow == "" && flagBranch == "" && hist != nil {
+		labels := hist.Labels("deploy")
+		if len(labels) > 0 {
+			labels = append([]string{"+ New deployment"}, labels...)
+			selected, err := ui.Select("Deploy", labels)
+			if err != nil {
+				os.Exit(0)
+			}
+			if selected != "+ New deployment" {
+				// Extract label before the timestamp
+				label := selected[:strings.LastIndex(selected, " (")]
+				entry := hist.FindByLabel("deploy", label)
+				if entry != nil {
+					return executeDeployFromHistory(entry)
+				}
+			}
+		}
+	}
+
+	// 1. Select repository
+	repo, err := selectRepo()
 	if err != nil {
 		return err
 	}
 
-	// Select workflow
-	workflow, err := selectWorkflow(repo)
+	// 2. Select workflow
+	workflow, workflowName, err := selectDeployWorkflow(repo)
 	if err != nil {
 		return err
 	}
 
-	// Determine branch
-	branch := flagBranch
-	if branch == "" {
-		branch = "main"
+	// 3. Select branch
+	branch, err := selectBranch(repo)
+	if err != nil {
+		return err
 	}
 
-	// Build command
+	// 4. Trigger
+	label := fmt.Sprintf("%s/%s @ %s", repo, workflowName, branch)
+	deployArgs := []string{"--repo", repo, "--workflow", workflow, "--branch", branch}
+	for _, input := range flagInputs {
+		deployArgs = append(deployArgs, "--input", input)
+	}
+
+	if err := triggerWorkflow(repo, workflow, branch); err != nil {
+		return err
+	}
+
+	// Save to history
+	if hist != nil {
+		hist.Add("deploy", label, deployArgs)
+		hist.Save() //nolint:errcheck
+	}
+
+	// Watch logs if requested
+	if flagWatch {
+		return watchLatestRun(repo, workflow)
+	}
+
+	return nil
+}
+
+func replayLast(hist *history.Store) error {
+	labels := hist.Labels("deploy")
+	if len(labels) == 0 {
+		return fmt.Errorf("no deployment history found")
+	}
+
+	// Get the most recent entry
+	label := labels[0][:strings.LastIndex(labels[0], " (")]
+	entry := hist.FindByLabel("deploy", label)
+	if entry == nil {
+		return fmt.Errorf("could not find last deployment")
+	}
+
+	return executeDeployFromHistory(entry)
+}
+
+func executeDeployFromHistory(entry *history.Entry) error {
+	var repo, workflow, branch string
+	for i := 0; i < len(entry.Args)-1; i += 2 {
+		switch entry.Args[i] {
+		case "--repo":
+			repo = entry.Args[i+1]
+		case "--workflow":
+			workflow = entry.Args[i+1]
+		case "--branch":
+			branch = entry.Args[i+1]
+		}
+	}
+
+	if repo == "" || workflow == "" || branch == "" {
+		return fmt.Errorf("incomplete history entry")
+	}
+
+	ui.PrintStep("↻", fmt.Sprintf("Replaying: %s", entry.Label))
+	if err := triggerWorkflow(repo, workflow, branch); err != nil {
+		return err
+	}
+
+	if flagWatch {
+		return watchLatestRun(repo, workflow)
+	}
+	return nil
+}
+
+func selectRepo() (string, error) {
+	if flagRepo != "" {
+		return flagRepo, nil
+	}
+
+	// Try to detect from current git repo
+	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
+	if err == nil {
+		currentRepo := strings.TrimSpace(string(out))
+		if currentRepo != "" {
+			ui.PrintStep("◆", fmt.Sprintf("Detected repository: %s", currentRepo))
+
+			// List user's repos for selection
+			reposOut, err := exec.Command("gh", "repo", "list", "--json", "nameWithOwner", "--limit", "50", "-q", ".[].nameWithOwner").Output()
+			if err == nil {
+				repos := strings.Split(strings.TrimSpace(string(reposOut)), "\n")
+				if len(repos) > 1 {
+					// Put current repo first
+					options := []string{currentRepo + " (current)"}
+					for _, r := range repos {
+						r = strings.TrimSpace(r)
+						if r != "" && r != currentRepo {
+							options = append(options, r)
+						}
+					}
+
+					selected, err := ui.Select("Select repository", options)
+					if err != nil {
+						os.Exit(0)
+					}
+
+					return strings.TrimSuffix(selected, " (current)"), nil
+				}
+			}
+			return currentRepo, nil
+		}
+	}
+
+	// Fallback: list user's repos
+	reposOut, err := exec.Command("gh", "repo", "list", "--json", "nameWithOwner", "--limit", "50", "-q", ".[].nameWithOwner").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to list repositories: %w", err)
+	}
+
+	repos := strings.Split(strings.TrimSpace(string(reposOut)), "\n")
+	var cleaned []string
+	for _, r := range repos {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			cleaned = append(cleaned, r)
+		}
+	}
+
+	if len(cleaned) == 0 {
+		return "", fmt.Errorf("no repositories found. Use --repo owner/repo")
+	}
+
+	selected, err := ui.Select("Select repository", cleaned)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	return selected, nil
+}
+
+func selectDeployWorkflow(repo string) (fileName, displayName string, err error) {
+	if flagWorkflow != "" {
+		return flagWorkflow, flagWorkflow, nil
+	}
+
+	out, err := exec.Command("gh", "workflow", "list", "--repo", repo, "--json", "name,id,path,state").Output()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to list workflows: %w", err)
+	}
+
+	var workflows []ghWorkflow
+	if err := json.Unmarshal(out, &workflows); err != nil {
+		return "", "", fmt.Errorf("failed to parse workflows: %w", err)
+	}
+
+	var active []ghWorkflow
+	for _, w := range workflows {
+		if w.State == "active" {
+			active = append(active, w)
+		}
+	}
+
+	if len(active) == 0 {
+		return "", "", fmt.Errorf("no active workflows found in %s", repo)
+	}
+
+	options := make([]string, len(active))
+	for i, w := range active {
+		options[i] = fmt.Sprintf("%s (%s)", w.Name, extractWorkflowFile(w.Path))
+	}
+
+	selected, err := ui.Select("Select workflow", options)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	for i, opt := range options {
+		if opt == selected {
+			return extractWorkflowFile(active[i].Path), active[i].Name, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("workflow not found")
+}
+
+func selectBranch(repo string) (string, error) {
+	if flagBranch != "" {
+		return flagBranch, nil
+	}
+
+	// Get branches from the repo
+	out, err := exec.Command("gh", "api", fmt.Sprintf("repos/%s/branches", repo),
+		"--jq", ".[].name", "--paginate").Output()
+	if err != nil {
+		// Fallback to manual input
+		branch, err := ui.Input("Branch name", "main")
+		if err != nil {
+			os.Exit(0)
+		}
+		if branch == "" {
+			return "main", nil
+		}
+		return branch, nil
+	}
+
+	branches := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var cleaned []string
+	for _, b := range branches {
+		b = strings.TrimSpace(b)
+		if b != "" {
+			cleaned = append(cleaned, b)
+		}
+	}
+
+	if len(cleaned) == 0 {
+		return "main", nil
+	}
+
+	selected, err := ui.Select("Select branch", cleaned)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	return selected, nil
+}
+
+func triggerWorkflow(repo, workflow, branch string) error {
 	ghArgs := []string{"workflow", "run", workflow, "--repo", repo, "--ref", branch}
 
 	for _, input := range flagInputs {
 		ghArgs = append(ghArgs, "--field", input)
 	}
 
-	fmt.Printf("Triggering workflow %q on %s (branch: %s)...\n", workflow, repo, branch)
+	ui.PrintStep("▶", fmt.Sprintf("Triggering %s on %s (branch: %s)", workflow, repo, branch))
 
 	c := exec.Command("gh", ghArgs...)
 	c.Stdin = os.Stdin
@@ -82,74 +343,49 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to trigger workflow: %w", err)
 	}
 
-	fmt.Println("Workflow triggered successfully.")
-	fmt.Printf("View runs: gh run list --repo %s --workflow %s\n", repo, workflow)
+	ui.PrintSuccess("Workflow triggered successfully")
 	return nil
 }
 
-func resolveRepo() (string, error) {
-	if flagRepo != "" {
-		return flagRepo, nil
-	}
+func watchLatestRun(repo, workflow string) error {
+	ui.PrintStep("◉", "Waiting for workflow run to start...")
 
-	// Try to detect from current git repo
-	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
-	if err == nil {
-		repo := strings.TrimSpace(string(out))
-		if repo != "" {
-			return repo, nil
-		}
-	}
+	// Wait a moment for the run to be created
+	time.Sleep(3 * time.Second)
 
-	return "", fmt.Errorf("could not detect repository. Use --repo owner/repo")
-}
-
-func selectWorkflow(repo string) (string, error) {
-	if flagWorkflow != "" {
-		return flagWorkflow, nil
-	}
-
-	out, err := exec.Command("gh", "workflow", "list", "--repo", repo, "--json", "name,id,path,state").Output()
+	// Get the latest run ID
+	out, err := exec.Command("gh", "run", "list",
+		"--repo", repo,
+		"--workflow", workflow,
+		"--limit", "1",
+		"--json", "databaseId",
+		"-q", ".[0].databaseId").Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to list workflows: %w", err)
+		return fmt.Errorf("failed to get run ID: %w", err)
 	}
 
-	var workflows []ghWorkflow
-	if err := json.Unmarshal(out, &workflows); err != nil {
-		return "", fmt.Errorf("failed to parse workflows: %w", err)
+	runID := strings.TrimSpace(string(out))
+	if runID == "" {
+		return fmt.Errorf("no run found")
 	}
 
-	// Filter active workflows
-	var active []ghWorkflow
-	for _, w := range workflows {
-		if w.State == "active" {
-			active = append(active, w)
-		}
+	ui.PrintStep("◉", fmt.Sprintf("Streaming logs for run #%s", runID))
+	fmt.Println(ui.BoxStyle.Render("Press Ctrl+C to stop watching"))
+	fmt.Println()
+
+	c := exec.Command("gh", "run", "watch", runID, "--repo", repo, "--exit-status")
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+
+	if err := c.Run(); err != nil {
+		ui.PrintError(fmt.Sprintf("Workflow run failed (run #%s)", runID))
+		fmt.Printf("\nView full logs: gh run view %s --repo %s --log\n", runID, repo)
+		return err
 	}
 
-	if len(active) == 0 {
-		return "", fmt.Errorf("no active workflows found in %s", repo)
-	}
-
-	// Build display names
-	options := make([]string, len(active))
-	for i, w := range active {
-		options[i] = fmt.Sprintf("%s (%s)", w.Name, extractWorkflowFile(w.Path))
-	}
-
-	selected, err := ui.Select("Select workflow to trigger", options)
-	if err != nil {
-		os.Exit(0)
-	}
-
-	// Find matching workflow and return its file name
-	for i, opt := range options {
-		if opt == selected {
-			return extractWorkflowFile(active[i].Path), nil
-		}
-	}
-
-	return "", fmt.Errorf("workflow not found")
+	ui.PrintSuccess(fmt.Sprintf("Workflow run #%s completed successfully", runID))
+	return nil
 }
 
 func extractWorkflowFile(path string) string {

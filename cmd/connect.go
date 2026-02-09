@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	awsutil "github.com/20uf/devcli/internal/aws"
 	"github.com/20uf/devcli/internal/ecs"
+	"github.com/20uf/devcli/internal/history"
 	"github.com/20uf/devcli/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -22,9 +24,17 @@ var (
 var connectCmd = &cobra.Command{
 	Use:   "connect",
 	Short: "Connect to an ECS container interactively",
-	Long:  "Discover ECS clusters, services, tasks and containers dynamically, then open an interactive shell.",
-	RunE:  runConnect,
+	Long: `Discover ECS clusters, services, tasks and containers dynamically, then open an interactive shell.
+
+Examples:
+  devcli connect                                         Interactive selection
+  devcli connect --profile dev --cluster my-cluster      Partial flags
+  devcli connect --profile dev --cluster c --service s   Full non-interactive
+  devcli connect --shell /bin/bash                       Custom shell`,
+	RunE: runConnect,
 }
+
+var flagConnectLast bool
 
 func init() {
 	connectCmd.Flags().StringVar(&flagCluster, "cluster", "", "ECS cluster name or ARN (skip selection)")
@@ -33,6 +43,7 @@ func init() {
 	connectCmd.Flags().StringVar(&flagShell, "shell", "", "Shell command (default: auto-detect)")
 	connectCmd.Flags().StringVar(&flagProfile, "profile", "", "AWS profile to use")
 	connectCmd.Flags().StringVar(&flagRegion, "region", "", "AWS region to use")
+	connectCmd.Flags().BoolVar(&flagConnectLast, "last", false, "Replay last connection")
 	rootCmd.AddCommand(connectCmd)
 }
 
@@ -40,6 +51,18 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	// 0. Check required dependencies
 	if err := awsutil.CheckDependencies(); err != nil {
 		return err
+	}
+
+	// Replay last or show history
+	if flagConnectLast {
+		return replayLastConnect()
+	}
+
+	// Show history if no flags
+	if flagProfile == "" && flagCluster == "" && flagService == "" {
+		if entry := showConnectHistory(); entry != nil {
+			return replayConnectEntry(entry)
+		}
 	}
 
 	// 1. Select AWS profile
@@ -85,8 +108,19 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	// 5. Determine shell
 	shell := resolveShell()
 
-	// 6. Execute
-	fmt.Printf("Connecting to %s/%s/%s (%s)...\n", cluster, service, container, shell)
+	// 6. Save to history
+	hist, _ := history.Load()
+	if hist != nil {
+		label := fmt.Sprintf("%s → %s/%s/%s", profile, cluster, service, container)
+		hist.Add("connect", label, []string{
+			"--profile", profile, "--cluster", cluster,
+			"--service", service, "--container", container,
+		})
+		hist.Save() //nolint:errcheck
+	}
+
+	// 7. Execute
+	ui.PrintStep("▶", fmt.Sprintf("Connecting to %s/%s/%s", cluster, service, container))
 	return client.ExecInteractive(cmd.Context(), cluster, task, container, shell, profile)
 }
 
@@ -201,4 +235,85 @@ func resolveShell() string {
 		return flagShell
 	}
 	return "su -s /bin/sh www-data"
+}
+
+func showConnectHistory() *history.Entry {
+	hist, err := history.Load()
+	if err != nil || hist == nil {
+		return nil
+	}
+
+	labels := hist.Labels("connect")
+	if len(labels) == 0 {
+		return nil
+	}
+
+	labels = append([]string{"+ New connection"}, labels...)
+	selected, err := ui.Select("Connect", labels)
+	if err != nil {
+		os.Exit(0)
+	}
+
+	if selected == "+ New connection" {
+		return nil
+	}
+
+	label := selected[:strings.LastIndex(selected, " (")]
+	return hist.FindByLabel("connect", label)
+}
+
+func replayLastConnect() error {
+	hist, err := history.Load()
+	if err != nil {
+		return fmt.Errorf("no connection history found")
+	}
+
+	labels := hist.Labels("connect")
+	if len(labels) == 0 {
+		return fmt.Errorf("no connection history found")
+	}
+
+	label := labels[0][:strings.LastIndex(labels[0], " (")]
+	entry := hist.FindByLabel("connect", label)
+	if entry == nil {
+		return fmt.Errorf("could not find last connection")
+	}
+
+	return replayConnectEntry(entry)
+}
+
+func replayConnectEntry(entry *history.Entry) error {
+	var profile, cluster, service, container string
+	for i := 0; i < len(entry.Args)-1; i += 2 {
+		switch entry.Args[i] {
+		case "--profile":
+			profile = entry.Args[i+1]
+		case "--cluster":
+			cluster = entry.Args[i+1]
+		case "--service":
+			service = entry.Args[i+1]
+		case "--container":
+			container = entry.Args[i+1]
+		}
+	}
+
+	ui.PrintStep("↻", fmt.Sprintf("Replaying: %s", entry.Label))
+
+	if err := awsutil.EnsureSSOLogin(profile); err != nil {
+		return err
+	}
+
+	client, err := ecs.NewClient(profile, flagRegion)
+	if err != nil {
+		return fmt.Errorf("failed to create AWS client: %w", err)
+	}
+
+	task, err := client.GetRunningTask(rootCmd.Context(), cluster, service)
+	if err != nil {
+		return fmt.Errorf("no running task found: %w", err)
+	}
+
+	shell := resolveShell()
+	ui.PrintStep("▶", fmt.Sprintf("Connecting to %s/%s/%s", cluster, service, container))
+	return client.ExecInteractive(rootCmd.Context(), cluster, task, container, shell, profile)
 }
