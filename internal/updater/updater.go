@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
@@ -137,6 +138,18 @@ func downloadAndReplace(url string) error {
 	}
 
 	if err := os.Rename(tmpFile.Name(), execPath); err != nil {
+		// Permission denied — retry with sudo
+		if os.IsPermission(err) {
+			fmt.Println("Permission denied, retrying with sudo...")
+			cmd := exec.Command("sudo", "mv", tmpFile.Name(), execPath)
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if sudoErr := cmd.Run(); sudoErr != nil {
+				return fmt.Errorf("failed to replace binary with sudo: %w", sudoErr)
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to replace binary: %w", err)
 	}
 
