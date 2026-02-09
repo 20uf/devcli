@@ -53,6 +53,11 @@ type ghWorkflow struct {
 	State string `json:"state"`
 }
 
+type repoInfo struct {
+	NameWithOwner string `json:"nameWithOwner"`
+	Description   string `json:"description"`
+}
+
 func runDeploy(cmd *cobra.Command, args []string) error {
 	// Check gh is installed
 	if _, err := exec.LookPath("gh"); err != nil {
@@ -71,13 +76,15 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	if flagRepo == "" && flagWorkflow == "" && flagBranch == "" && hist != nil {
 		labels := hist.Labels("deploy")
 		if len(labels) > 0 {
+			if len(labels) > 10 {
+				labels = labels[:10]
+			}
 			labels = append([]string{"+ New deployment"}, labels...)
 			selected, err := ui.Select("Deploy", labels)
 			if err != nil {
 				os.Exit(0)
 			}
 			if selected != "+ New deployment" {
-				// Extract label before the timestamp
 				label := selected[:strings.LastIndex(selected, " (")]
 				entry := hist.FindByLabel("deploy", label)
 				if entry != nil {
@@ -136,7 +143,6 @@ func replayLast(hist *history.Store) error {
 		return fmt.Errorf("no deployment history found")
 	}
 
-	// Get the most recent entry
 	label := labels[0][:strings.LastIndex(labels[0], " (")]
 	entry := hist.FindByLabel("deploy", label)
 	if entry == nil {
@@ -174,27 +180,23 @@ func executeDeployFromHistory(entry *history.Entry) error {
 	return nil
 }
 
-func listReposForOwner(owner string) []string {
-	args := []string{"repo", "list", "--json", "nameWithOwner", "--limit", "100", "-q", ".[].nameWithOwner"}
+func listReposForOwner(owner string) ([]repoInfo, error) {
+	args := []string{"repo", "list", "--json", "nameWithOwner,description", "--sort", "updated", "--limit", "10"}
 	if owner != "" {
 		args = append(args, owner)
 	}
 	out, err := exec.Command("gh", args...).Output()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	var repos []string
-	for _, r := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		r = strings.TrimSpace(r)
-		if r != "" {
-			repos = append(repos, r)
-		}
+	var repos []repoInfo
+	if err := json.Unmarshal(out, &repos); err != nil {
+		return nil, err
 	}
-	return repos
+	return repos, nil
 }
 
 func listOwners() []string {
-	// Get current user
 	userOut, err := exec.Command("gh", "api", "user", "--jq", ".login").Output()
 	if err != nil {
 		return nil
@@ -203,7 +205,6 @@ func listOwners() []string {
 
 	owners := []string{user}
 
-	// Get organizations
 	orgsOut, err := exec.Command("gh", "api", "user/orgs", "--jq", ".[].login").Output()
 	if err == nil {
 		for _, org := range strings.Split(strings.TrimSpace(string(orgsOut)), "\n") {
@@ -244,31 +245,53 @@ func selectRepo() (string, error) {
 		selectedOwner = owners[0]
 	}
 
-	// List repos for the selected owner
-	repos := listReposForOwner(selectedOwner)
-	if len(repos) == 0 {
+	ui.PrintStep("◆", fmt.Sprintf("Organization: %s", selectedOwner))
+
+	// List repos for the selected owner (top 10 most active)
+	repos, err := listReposForOwner(selectedOwner)
+	if err != nil || len(repos) == 0 {
 		return "", fmt.Errorf("no repositories found for %s. Use --repo owner/repo", selectedOwner)
 	}
 
-	// Put current repo first if it belongs to the selected owner
-	var options []string
-	if currentRepo != "" && strings.HasPrefix(currentRepo, selectedOwner+"/") {
-		options = append(options, currentRepo+" (current)")
-		for _, r := range repos {
-			if r != currentRepo {
-				options = append(options, r)
-			}
+	// Build options: strip owner prefix, add description
+	prefix := selectedOwner + "/"
+	maxNameLen := 0
+	for _, r := range repos {
+		name := strings.TrimPrefix(r.NameWithOwner, prefix)
+		if r.NameWithOwner == currentRepo {
+			name += " *"
 		}
-	} else {
-		options = repos
+		if len(name) > maxNameLen {
+			maxNameLen = len(name)
+		}
 	}
 
-	selected, err := ui.Select("Select repository", options)
+	var options []ui.SelectOption
+	for _, r := range repos {
+		name := strings.TrimPrefix(r.NameWithOwner, prefix)
+		if r.NameWithOwner == currentRepo {
+			name += " *"
+		}
+		display := name
+		if r.Description != "" {
+			desc := r.Description
+			if len(desc) > 50 {
+				desc = desc[:47] + "..."
+			}
+			display = fmt.Sprintf("%-*s  %s", maxNameLen+1, name, desc)
+		}
+		options = append(options, ui.SelectOption{
+			Display: display,
+			Value:   r.NameWithOwner,
+		})
+	}
+
+	selected, err := ui.SelectWithOptions("Select repository", options)
 	if err != nil {
 		os.Exit(0)
 	}
 
-	return strings.TrimSuffix(selected, " (current)"), nil
+	return selected, nil
 }
 
 func selectDeployWorkflow(repo string) (fileName, displayName string, err error) {
@@ -321,11 +344,9 @@ func selectBranch(repo string) (string, error) {
 		return flagBranch, nil
 	}
 
-	// Get branches from the repo
 	out, err := exec.Command("gh", "api", fmt.Sprintf("repos/%s/branches", repo),
 		"--jq", ".[].name", "--paginate").Output()
 	if err != nil {
-		// Fallback to manual input
 		branch, err := ui.Input("Branch name", "main")
 		if err != nil {
 			os.Exit(0)
@@ -382,10 +403,8 @@ func triggerWorkflow(repo, workflow, branch string) error {
 func watchLatestRun(repo, workflow string) error {
 	ui.PrintStep("◉", "Waiting for workflow run to start...")
 
-	// Wait a moment for the run to be created
 	time.Sleep(3 * time.Second)
 
-	// Get the latest run ID
 	out, err := exec.Command("gh", "run", "list",
 		"--repo", repo,
 		"--workflow", workflow,

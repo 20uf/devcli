@@ -16,6 +16,7 @@ var rootCmd = &cobra.Command{
 	Long:  `Devcli is a modular CLI toolbox to manage your dev environment, workflows, and infrastructure interactions.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ui.PrintBanner(appVersion)
+		cmd.Help() //nolint:errcheck
 	},
 }
 

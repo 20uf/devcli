@@ -47,7 +47,65 @@ var (
 			Bold(true)
 )
 
-// Select displays an interactive selection prompt with fuzzy filtering.
+// devTheme returns a custom huh theme with wheel picker focus effect.
+func devTheme() *huh.Theme {
+	t := huh.ThemeBase()
+
+	// Remove the left border for a cleaner look
+	t.Focused.Base = lipgloss.NewStyle().PaddingLeft(1)
+	t.Focused.Card = t.Focused.Base
+
+	// Title
+	t.Focused.Title = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+
+	// Select: wheel picker effect — bright cursor, muted rest
+	t.Focused.SelectSelector = lipgloss.NewStyle().Foreground(Primary).SetString("› ")
+	t.Focused.SelectedOption = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	t.Focused.UnselectedOption = lipgloss.NewStyle().Foreground(Muted)
+	t.Focused.Option = lipgloss.NewStyle().Foreground(Muted)
+
+	// Scroll indicators
+	t.Focused.NextIndicator = lipgloss.NewStyle().Foreground(Secondary).SetString("  ↓")
+	t.Focused.PrevIndicator = lipgloss.NewStyle().Foreground(Secondary).SetString("  ↑")
+
+	// Filter input
+	t.Focused.TextInput.Cursor = lipgloss.NewStyle().Foreground(Primary)
+	t.Focused.TextInput.Placeholder = lipgloss.NewStyle().Foreground(Muted)
+	t.Focused.TextInput.Prompt = lipgloss.NewStyle().Foreground(Secondary).SetString("/ ")
+	t.Focused.TextInput.Text = lipgloss.NewStyle().Foreground(Text)
+
+	// Buttons
+	t.Focused.FocusedButton = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF")).Background(Primary).Padding(0, 1)
+	t.Focused.BlurredButton = lipgloss.NewStyle().Foreground(Muted).Background(lipgloss.Color("#333")).Padding(0, 1)
+
+	// Blurred = same but hidden border
+	t.Blurred = t.Focused
+	t.Blurred.Base = lipgloss.NewStyle().PaddingLeft(1)
+	t.Blurred.Card = t.Blurred.Base
+	t.Blurred.NextIndicator = lipgloss.NewStyle()
+	t.Blurred.PrevIndicator = lipgloss.NewStyle()
+
+	return t
+}
+
+func selectHeight(count int) int {
+	h := count + 2
+	if h > 15 {
+		h = 15
+	}
+	if h < 5 {
+		h = 5
+	}
+	return h
+}
+
+// SelectOption represents a display/value pair for select prompts.
+type SelectOption struct {
+	Display string
+	Value   string
+}
+
+// Select displays an interactive selection prompt with type-to-filter.
 func Select(label string, options []string) (string, error) {
 	var selected string
 
@@ -56,13 +114,14 @@ func Select(label string, options []string) (string, error) {
 		huhOptions[i] = huh.NewOption(opt, opt)
 	}
 
-	err := huh.NewSelect[string]().
+	sel := huh.NewSelect[string]().
 		Title(label).
 		Options(huhOptions...).
 		Value(&selected).
-		Height(20).
-		Run()
+		Height(selectHeight(len(options))).
+		Filtering(true)
 
+	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
 		return "", err
 	}
@@ -70,20 +129,39 @@ func Select(label string, options []string) (string, error) {
 	return selected, nil
 }
 
-// SelectWithFilter displays a filterable selection prompt.
-func SelectWithFilter(label string, options []string) (string, error) {
-	return Select(label, options)
+// SelectWithOptions displays a selection prompt with separate display/value pairs.
+func SelectWithOptions(label string, options []SelectOption) (string, error) {
+	var selected string
+
+	huhOptions := make([]huh.Option[string], len(options))
+	for i, opt := range options {
+		huhOptions[i] = huh.NewOption(opt.Display, opt.Value)
+	}
+
+	sel := huh.NewSelect[string]().
+		Title(label).
+		Options(huhOptions...).
+		Value(&selected).
+		Height(selectHeight(len(options))).
+		Filtering(true)
+
+	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
+	if err != nil {
+		return "", err
+	}
+
+	return selected, nil
 }
 
 // Confirm displays a yes/no prompt.
 func Confirm(label string) (bool, error) {
 	var confirmed bool
 
-	err := huh.NewConfirm().
+	c := huh.NewConfirm().
 		Title(label).
-		Value(&confirmed).
-		Run()
+		Value(&confirmed)
 
+	err := huh.NewForm(huh.NewGroup(c)).WithTheme(devTheme()).Run()
 	if err != nil {
 		return false, err
 	}
@@ -95,12 +173,12 @@ func Confirm(label string) (bool, error) {
 func Input(label, placeholder string) (string, error) {
 	var value string
 
-	err := huh.NewInput().
+	i := huh.NewInput().
 		Title(label).
 		Placeholder(placeholder).
-		Value(&value).
-		Run()
+		Value(&value)
 
+	err := huh.NewForm(huh.NewGroup(i)).WithTheme(devTheme()).Run()
 	if err != nil {
 		return "", err
 	}
