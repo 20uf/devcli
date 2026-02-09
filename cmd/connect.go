@@ -248,8 +248,13 @@ func showConnectHistory() *history.Entry {
 		return nil
 	}
 
+	// Keep only the 10 most recent
+	if len(labels) > 10 {
+		labels = labels[:10]
+	}
+
 	labels = append([]string{"+ New connection"}, labels...)
-	selected, err := ui.Select("Connect", labels)
+	selected, err := ui.Select("Recent connections", labels)
 	if err != nil {
 		os.Exit(0)
 	}

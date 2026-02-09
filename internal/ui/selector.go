@@ -119,8 +119,8 @@ func PrintBanner(version string) {
 
 	fmt.Println(BannerStyle.Render(banner))
 	fmt.Println()
-	fmt.Println(MutedStyle.Render(fmt.Sprintf("  v%s — ECS Container Access Tool", version)))
-	fmt.Println(MutedStyle.Render("  Maintainer: Michael COULLERET <hello@0uf.eu>"))
+	fmt.Println(MutedStyle.Render(fmt.Sprintf("  v%s — Focus on coding, not on tooling.", version)))
+	fmt.Println(MutedStyle.Render("  Michael COULLERET <hello@0uf.eu>"))
 	fmt.Println()
 }
 
