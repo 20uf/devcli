@@ -37,9 +37,19 @@ func init() {
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
-	// Select AWS profile if not provided
+	// 0. Check required dependencies
+	if err := awsutil.CheckDependencies(); err != nil {
+		return err
+	}
+
+	// 1. Select AWS profile
 	profile, err := selectProfile()
 	if err != nil {
+		return err
+	}
+
+	// 2. Ensure SSO session is valid (auto-login if expired)
+	if err := awsutil.EnsureSSOLogin(profile); err != nil {
 		return err
 	}
 
