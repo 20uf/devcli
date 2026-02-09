@@ -136,7 +136,9 @@ func setupZsh() error {
 		fmt.Printf("Completion file already exists: %s\n", completionFile)
 		fmt.Printf("Overwrite? [y/N] ")
 		var reply string
-		fmt.Scanln(&reply)
+		if _, err := fmt.Scanln(&reply); err != nil {
+			reply = "n"
+		}
 		if strings.ToLower(strings.TrimSpace(reply)) != "y" {
 			fmt.Println("Skipped.")
 			return nil
@@ -192,7 +194,9 @@ func writeCompletionFile(path, shell string) error {
 		fmt.Printf("Completion file already exists: %s\n", path)
 		fmt.Printf("Overwrite? [y/N] ")
 		var reply string
-		fmt.Scanln(&reply)
+		if _, err := fmt.Scanln(&reply); err != nil {
+			reply = "n"
+		}
 		if strings.ToLower(strings.TrimSpace(reply)) != "y" {
 			fmt.Println("Skipped.")
 			return nil

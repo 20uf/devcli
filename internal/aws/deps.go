@@ -68,7 +68,9 @@ func CheckDependencies() error {
 		fmt.Printf("Install %s now? [y/N] ", dep.Name)
 
 		var reply string
-		fmt.Scanln(&reply)
+		if _, err := fmt.Scanln(&reply); err != nil {
+			reply = "n"
+		}
 		reply = strings.TrimSpace(strings.ToLower(reply))
 
 		if reply != "y" && reply != "yes" {
