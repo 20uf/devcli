@@ -31,18 +31,6 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 }
 
-type ghRun struct {
-	DatabaseID int    `json:"databaseId"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	Branch     string `json:"headBranch"`
-	Event      string `json:"event"`
-	Number     int    `json:"number"`
-	URL        string `json:"url"`
-	CreatedAt  string `json:"createdAt"`
-}
-
 func runStatus(cmd *cobra.Command, args []string) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("GitHub CLI (gh) is required.\n  Install: https://cli.github.com/")
