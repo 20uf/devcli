@@ -203,8 +203,7 @@ func PrintBanner(version string) {
 	fmt.Println(BannerStyle.Render(bannerArt))
 	fmt.Println()
 	fmt.Println(MutedStyle.Render(fmt.Sprintf("  v%s — Focus on coding, not on tooling.", version)))
-	fmt.Println(MutedStyle.Render("  Michael COULLERET <hello@0uf.eu>"))
-	fmt.Println(MutedStyle.Render("  Contributors: Thomas Talbot"))
+	fmt.Println(MutedStyle.Render("  Michael COULLERET, Thomas Talbot and contributors."))
 	fmt.Println()
 }
 
@@ -261,8 +260,9 @@ func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, er
 		fmt.Println(versionText)
 	}
 
-	fmt.Println(MutedStyle.Render("  Michael COULLERET <hello@0uf.eu>"))
-	fmt.Println(MutedStyle.Render("  Contributors: Thomas Talbot"))
+	fmt.Println(MutedStyle.Render("  Michael COULLERET, Thomas Talbot and contributors."))
+	fmt.Println()
+	fmt.Println(MutedStyle.Render("  Usage: devcli [command] [options]"))
 	fmt.Println()
 
 	return result
