@@ -110,6 +110,9 @@ git push --tags
 - [ ] **Consulter SSM** — Naviguer et lire les paramètres AWS SSM Parameter Store (lecture seule)
 - [ ] **CodePipeline** — Déclencher un pipeline CodePipeline et suivre son exécution en temps réel
 - [ ] **GitHub Actions status** — Suivre l'état d'avancement d'un job GitHub Actions en temps réel
+- [ ] **Deploy workflow inputs** — Détecter automatiquement les inputs d'un workflow et proposer un formulaire interactif (ex: Target Environment)
+- [ ] **Mode verbose (`--verbose`)** — Afficher toutes les commandes exécutées, appels API et réponses AWS/GitHub pour le debug
+- [ ] **Stream logs GitHub Actions** — Streamer les logs d'exécution d'un workflow run en temps réel dans le terminal
 
 ## Contributors
 
