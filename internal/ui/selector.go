@@ -1,13 +1,18 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
+	// ErrUserAbort is returned when the user cancels a prompt (ESC / Ctrl+C).
+	ErrUserAbort = errors.New("user abort")
+
 	// Theme colors
 	Primary   = lipgloss.Color("#7C3AED")
 	Secondary = lipgloss.Color("#A78BFA")
@@ -123,7 +128,7 @@ func Select(label string, options []string) (string, error) {
 
 	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
-		return "", err
+		return "", ErrUserAbort
 	}
 
 	return selected, nil
@@ -147,7 +152,7 @@ func SelectWithOptions(label string, options []SelectOption) (string, error) {
 
 	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
-		return "", err
+		return "", ErrUserAbort
 	}
 
 	return selected, nil
@@ -163,7 +168,7 @@ func Confirm(label string) (bool, error) {
 
 	err := huh.NewForm(huh.NewGroup(c)).WithTheme(devTheme()).Run()
 	if err != nil {
-		return false, err
+		return false, ErrUserAbort
 	}
 
 	return confirmed, nil
@@ -180,26 +185,87 @@ func Input(label, placeholder string) (string, error) {
 
 	err := huh.NewForm(huh.NewGroup(i)).WithTheme(devTheme()).Run()
 	if err != nil {
-		return "", err
+		return "", ErrUserAbort
 	}
 
 	return value, nil
 }
 
-// PrintBanner displays the application banner.
-func PrintBanner(version string) {
-	banner := `
+const bannerArt = `
      _                _ _
   __| | _____   _____| (_)
  / _` + "`" + ` |/ _ \ \ / / __| | |
 | (_| |  __/\ V / (__| | |
  \__,_|\___| \_/ \___|_|_|`
 
-	fmt.Println(BannerStyle.Render(banner))
+// PrintBanner displays the application banner.
+func PrintBanner(version string) {
+	fmt.Println(BannerStyle.Render(bannerArt))
 	fmt.Println()
 	fmt.Println(MutedStyle.Render(fmt.Sprintf("  v%s — Focus on coding, not on tooling.", version)))
 	fmt.Println(MutedStyle.Render("  Michael COULLERET <hello@0uf.eu>"))
+	fmt.Println(MutedStyle.Render("  Contributors: Thomas Talbot"))
 	fmt.Println()
+}
+
+// UpdateResult holds the result of an update check.
+type UpdateResult struct {
+	Latest    string
+	HasUpdate bool
+}
+
+// PrintBannerWithUpdateCheck displays the banner with an inline update check.
+func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, error)) *UpdateResult {
+	fmt.Println(BannerStyle.Render(bannerArt))
+	fmt.Println()
+
+	versionText := MutedStyle.Render(fmt.Sprintf("  v%s — Focus on coding, not on tooling.", version))
+
+	var result *UpdateResult
+
+	if checkFn != nil {
+		// Show discreet loading indicator on the version line
+		fmt.Printf("%s  %s", versionText, MutedStyle.Render("⟳ checking..."))
+
+		// Run check with timeout
+		type checkResult struct {
+			latest    string
+			hasUpdate bool
+			err       error
+		}
+		ch := make(chan checkResult, 1)
+		go func() {
+			l, h, e := checkFn()
+			ch <- checkResult{l, h, e}
+		}()
+
+		var cr checkResult
+		select {
+		case cr = <-ch:
+		case <-time.After(3 * time.Second):
+			cr = checkResult{err: fmt.Errorf("timeout")}
+		}
+
+		// Clear the line and reprint with status
+		fmt.Print("\r\033[K")
+
+		if cr.err != nil {
+			fmt.Println(versionText)
+		} else if !cr.hasUpdate {
+			fmt.Printf("%s  %s\n", versionText, SuccessStyle.Render("✓ up to date"))
+		} else {
+			fmt.Printf("%s  %s\n", versionText, WarningStyle.Render(fmt.Sprintf("↑ v%s available", cr.latest)))
+			result = &UpdateResult{Latest: cr.latest, HasUpdate: true}
+		}
+	} else {
+		fmt.Println(versionText)
+	}
+
+	fmt.Println(MutedStyle.Render("  Michael COULLERET <hello@0uf.eu>"))
+	fmt.Println(MutedStyle.Render("  Contributors: Thomas Talbot"))
+	fmt.Println()
+
+	return result
 }
 
 // PrintStep displays a styled step message.

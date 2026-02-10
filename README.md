@@ -103,3 +103,9 @@ Releases are managed with [GoReleaser](https://goreleaser.com/). Tag a version t
 git tag v1.0.0
 git push --tags
 ```
+
+## Contributors
+
+A special thanks to all contributors:
+
+- **Thomas Talbot** — [thomas.talbot@ioni.tech](mailto:thomas.talbot@ioni.tech)

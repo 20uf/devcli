@@ -82,7 +82,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			labels = append([]string{"+ New deployment"}, labels...)
 			selected, err := ui.Select("Deploy", labels)
 			if err != nil {
-				os.Exit(0)
+				return err
 			}
 			if selected != "+ New deployment" {
 				label := selected[:strings.LastIndex(selected, " (")]
@@ -238,7 +238,7 @@ func selectRepo() (string, error) {
 	if len(owners) > 1 {
 		selected, err := ui.Select("Select owner", owners)
 		if err != nil {
-			os.Exit(0)
+			return "", err
 		}
 		selectedOwner = selected
 	} else if len(owners) == 1 {
@@ -288,7 +288,7 @@ func selectRepo() (string, error) {
 
 	selected, err := ui.SelectWithOptions("Select repository", options)
 	if err != nil {
-		os.Exit(0)
+		return "", err
 	}
 
 	return selected, nil
@@ -327,7 +327,7 @@ func selectDeployWorkflow(repo string) (fileName, displayName string, err error)
 
 	selected, err := ui.Select("Select workflow", options)
 	if err != nil {
-		os.Exit(0)
+		return "", "", err
 	}
 
 	for i, opt := range options {
@@ -349,7 +349,7 @@ func selectBranch(repo string) (string, error) {
 	if err != nil {
 		branch, err := ui.Input("Branch name", "main")
 		if err != nil {
-			os.Exit(0)
+			return "", err
 		}
 		if branch == "" {
 			return "main", nil
@@ -372,7 +372,7 @@ func selectBranch(repo string) (string, error) {
 
 	selected, err := ui.Select("Select branch", cleaned)
 	if err != nil {
-		os.Exit(0)
+		return "", err
 	}
 
 	return selected, nil

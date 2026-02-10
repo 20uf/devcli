@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	awsutil "github.com/20uf/devcli/internal/aws"
@@ -60,7 +59,11 @@ func runConnect(cmd *cobra.Command, args []string) error {
 
 	// Show history if no flags
 	if flagProfile == "" && flagCluster == "" && flagService == "" {
-		if entry := showConnectHistory(); entry != nil {
+		entry, err := showConnectHistory()
+		if err != nil {
+			return err
+		}
+		if entry != nil {
 			return replayConnectEntry(entry)
 		}
 	}
@@ -140,7 +143,7 @@ func selectCluster(client *ecs.Client) (string, error) {
 
 	selected, err := ui.Select("Select cluster", clusters)
 	if err != nil {
-		os.Exit(0)
+		return "", err
 	}
 
 	return selected, nil
@@ -162,7 +165,7 @@ func selectService(client *ecs.Client, cluster string) (string, error) {
 
 	selected, err := ui.Select("Select service", services)
 	if err != nil {
-		os.Exit(0)
+		return "", err
 	}
 
 	return selected, nil
@@ -197,7 +200,7 @@ func selectContainer(client *ecs.Client, cmd *cobra.Command, cluster, task strin
 
 	selected, err := ui.Select("Select container", containers)
 	if err != nil {
-		os.Exit(0)
+		return "", err
 	}
 
 	return selected, nil
@@ -224,7 +227,7 @@ func selectProfile() (string, error) {
 
 	selected, err := ui.Select("Select AWS profile", profiles)
 	if err != nil {
-		os.Exit(0)
+		return "", err
 	}
 
 	return selected, nil
@@ -237,15 +240,15 @@ func resolveShell() string {
 	return "su -s /bin/sh www-data"
 }
 
-func showConnectHistory() *history.Entry {
+func showConnectHistory() (*history.Entry, error) {
 	hist, err := history.Load()
 	if err != nil || hist == nil {
-		return nil
+		return nil, nil
 	}
 
 	labels := hist.Labels("connect")
 	if len(labels) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Keep only the 10 most recent
@@ -256,15 +259,15 @@ func showConnectHistory() *history.Entry {
 	labels = append([]string{"+ New connection"}, labels...)
 	selected, err := ui.Select("Recent connections", labels)
 	if err != nil {
-		os.Exit(0)
+		return nil, err
 	}
 
 	if selected == "+ New connection" {
-		return nil
+		return nil, nil
 	}
 
 	label := selected[:strings.LastIndex(selected, " (")]
-	return hist.FindByLabel("connect", label)
+	return hist.FindByLabel("connect", label), nil
 }
 
 func replayLastConnect() error {
