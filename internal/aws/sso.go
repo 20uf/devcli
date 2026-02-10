@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/20uf/devcli/internal/verbose"
 	"gopkg.in/ini.v1"
 )
 
@@ -46,7 +47,7 @@ func EnsureSSOLogin(profile string) error {
 	}
 
 	// Quick check: try sts get-caller-identity to see if session is valid
-	check := exec.Command("aws", "sts", "get-caller-identity", "--profile", profile)
+	check := verbose.Cmd(exec.Command("aws", "sts", "get-caller-identity", "--profile", profile))
 	check.Stderr = nil
 	check.Stdout = nil
 	if err := check.Run(); err == nil {
@@ -55,7 +56,7 @@ func EnsureSSOLogin(profile string) error {
 
 	fmt.Printf("SSO session expired for profile %q, logging in...\n", profile)
 
-	login := exec.Command("aws", "sso", "login", "--profile", profile)
+	login := verbose.Cmd(exec.Command("aws", "sso", "login", "--profile", profile))
 	login.Stdin = os.Stdin
 	login.Stdout = os.Stdout
 	login.Stderr = os.Stderr
@@ -65,7 +66,7 @@ func EnsureSSOLogin(profile string) error {
 	}
 
 	// Verify login succeeded
-	verify := exec.Command("aws", "sts", "get-caller-identity", "--profile", profile)
+	verify := verbose.Cmd(exec.Command("aws", "sts", "get-caller-identity", "--profile", profile))
 	out, err := verify.Output()
 	if err != nil {
 		return fmt.Errorf("SSO login succeeded but credentials are still invalid")
