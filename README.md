@@ -109,6 +109,7 @@ git push --tags
 - [ ] **Connect BDD** — Se connecter à une base de données dans un cluster (même UX que connect)
 - [ ] **Consulter SSM** — Naviguer et lire les paramètres AWS SSM Parameter Store (lecture seule)
 - [ ] **CodePipeline** — Déclencher un pipeline CodePipeline et suivre son exécution en temps réel
+- [ ] **GitHub Actions status** — Suivre l'état d'avancement d'un job GitHub Actions en temps réel
 
 ## Contributors
 
