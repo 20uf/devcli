@@ -250,7 +250,15 @@ func selectRepo() (string, error) {
 	// List repos for the selected owner (top 10 most active)
 	repos, err := listReposForOwner(selectedOwner)
 	if err != nil || len(repos) == 0 {
-		return "", fmt.Errorf("no repositories found for %s. Use --repo owner/repo", selectedOwner)
+		ui.PrintWarning(fmt.Sprintf("Could not list repositories for %s", selectedOwner))
+		repo, err := ui.Input("Repository (owner/repo)", selectedOwner+"/")
+		if err != nil {
+			return "", err
+		}
+		if repo == "" {
+			return "", fmt.Errorf("no repository specified")
+		}
+		return repo, nil
 	}
 
 	// Build options: strip owner prefix, add description
