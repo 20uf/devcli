@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/20uf/devcli/internal/tracker"
 	"github.com/20uf/devcli/internal/ui"
 	"github.com/20uf/devcli/internal/updater"
 	"github.com/20uf/devcli/internal/verbose"
@@ -59,15 +60,28 @@ func showHome(cmd *cobra.Command) {
 	}
 
 	// Interactive command selection loop
-	commands := []ui.SelectOption{
-		{Display: "connect    Connect to an ECS container interactively", Value: "connect"},
-		{Display: "deploy     Trigger a GitHub Actions deployment workflow", Value: "deploy"},
-		{Display: "status     View GitHub Actions workflow run status", Value: "status"},
-		{Display: "update     Update devcli to the latest version", Value: "update"},
-		{Display: "version    Print version information", Value: "version"},
-	}
-
 	for {
+		commands := []ui.SelectOption{
+			{Display: "connect    Connect to an ECS container interactively", Value: "connect"},
+			{Display: "deploy     Trigger a GitHub Actions deployment workflow", Value: "deploy"},
+		}
+
+		// Dynamic entry: show tracked runs count
+		if runs, err := tracker.Load(); err == nil {
+			active := runs.Active()
+			if len(active) > 0 {
+				label := fmt.Sprintf("status     Deployments in progress (%d)", len(active))
+				commands = append(commands, ui.SelectOption{Display: ui.WarningStyle.Render(label), Value: "status"})
+			} else if len(runs.All()) > 0 {
+				commands = append(commands, ui.SelectOption{Display: "status     Recent deployments", Value: "status"})
+			}
+		}
+
+		commands = append(commands,
+			ui.SelectOption{Display: "update     Update devcli to the latest version", Value: "update"},
+			ui.SelectOption{Display: "version    Print version information", Value: "version"},
+		)
+
 		selected, err := ui.SelectWithOptions("Available Commands", commands)
 		if err != nil {
 			return // ESC at home = exit

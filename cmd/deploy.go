@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/20uf/devcli/internal/history"
+	"github.com/20uf/devcli/internal/tracker"
 	"github.com/20uf/devcli/internal/ui"
 	"github.com/20uf/devcli/internal/verbose"
 	"github.com/spf13/cobra"
@@ -195,6 +196,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			if hist != nil {
 				hist.Add("deploy", label, deployArgs)
 				hist.Save() //nolint:errcheck
+			}
+
+			// Track the run for the dashboard
+			runID, findErr := findLatestRunID(repo, workflow)
+			if findErr == nil && runID != "" {
+				runs, loadErr := tracker.Load()
+				if loadErr == nil {
+					runs.Add(repo, workflow, branch, runID, label)
+					runs.Save() //nolint:errcheck
+				}
+				ui.PrintStep("◉", fmt.Sprintf("Tracking run #%s — view with `devcli status`", runID))
 			}
 
 			if flagWatch {
