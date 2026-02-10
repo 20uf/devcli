@@ -8,13 +8,21 @@ import (
 
 	"github.com/20uf/devcli/internal/ui"
 	"github.com/20uf/devcli/internal/updater"
+	"github.com/20uf/devcli/internal/verbose"
 	"github.com/spf13/cobra"
 )
+
+var flagVerbose bool
 
 var rootCmd = &cobra.Command{
 	Use:   "devcli",
 	Short: "Focus on coding, not on tooling.",
 	Long:  `Devcli is a modular CLI toolbox to manage your dev environment, workflows, and infrastructure interactions.`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if flagVerbose {
+			verbose.Enable()
+		}
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		showHome(cmd)
 	},
@@ -54,6 +62,7 @@ func showHome(cmd *cobra.Command) {
 	commands := []ui.SelectOption{
 		{Display: "connect    Connect to an ECS container interactively", Value: "connect"},
 		{Display: "deploy     Trigger a GitHub Actions deployment workflow", Value: "deploy"},
+		{Display: "status     View GitHub Actions workflow run status", Value: "status"},
 		{Display: "update     Update devcli to the latest version", Value: "update"},
 		{Display: "version    Print version information", Value: "version"},
 	}
@@ -85,6 +94,10 @@ func showHome(cmd *cobra.Command) {
 
 		fmt.Println()
 	}
+}
+
+func init() {
+	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Enable verbose output (show executed commands and API calls)")
 }
 
 func Execute() {

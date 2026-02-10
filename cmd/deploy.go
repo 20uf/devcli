@@ -1,16 +1,20 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/20uf/devcli/internal/history"
 	"github.com/20uf/devcli/internal/ui"
+	"github.com/20uf/devcli/internal/verbose"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -96,6 +100,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Step-based navigation: ESC goes back to previous step
 	var owner, repo, workflow, workflowName, branch string
+	var workflowInputValues []string
 
 	step := 0
 	if flagRepo != "" {
@@ -135,23 +140,55 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 			workflowName = wn
 			step++
 
-		case 3: // Select branch
-			b, err := selectBranch(repo)
+		case 3: // Workflow inputs (if any)
+			if len(flagInputs) > 0 {
+				// Inputs provided via flags, skip interactive
+				workflowInputValues = flagInputs
+				step++
+				continue
+			}
+
+			inputs, err := fetchWorkflowInputs(repo, workflow)
+			if err != nil {
+				verbose.Log("could not fetch workflow inputs: %s", err)
+				// Not fatal — workflow may not have inputs
+				workflowInputValues = nil
+				step++
+				continue
+			}
+
+			if len(inputs) == 0 {
+				workflowInputValues = nil
+				step++
+				continue
+			}
+
+			ui.PrintStep("◆", "Workflow inputs")
+			values, err := promptWorkflowInputs(inputs)
 			if err != nil {
 				step = 2 // ESC → back to workflow
+				continue
+			}
+			workflowInputValues = values
+			step++
+
+		case 4: // Select branch
+			b, err := selectBranch(repo)
+			if err != nil {
+				step = 3 // ESC → back to inputs
 				continue
 			}
 			branch = b
 			step++
 
-		case 4: // Trigger
+		case 5: // Trigger
 			label := fmt.Sprintf("%s/%s @ %s", repo, workflowName, branch)
 			deployArgs := []string{"--repo", repo, "--workflow", workflow, "--branch", branch}
-			for _, input := range flagInputs {
+			for _, input := range workflowInputValues {
 				deployArgs = append(deployArgs, "--input", input)
 			}
 
-			if err := triggerWorkflow(repo, workflow, branch); err != nil {
+			if err := triggerWorkflowWithInputs(repo, workflow, branch, workflowInputValues); err != nil {
 				return err
 			}
 
@@ -184,7 +221,7 @@ func selectRepoForOwner(owner string) (string, error) {
 
 	// Try to detect current repo
 	var currentRepo string
-	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
+	out, err := verbose.Cmd(exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")).Output()
 	if err == nil {
 		currentRepo = strings.TrimSpace(string(out))
 	}
@@ -262,6 +299,7 @@ func replayLast(hist *history.Store) error {
 
 func executeDeployFromHistory(entry *history.Entry) error {
 	var repo, workflow, branch string
+	var inputs []string
 	for i := 0; i < len(entry.Args)-1; i += 2 {
 		switch entry.Args[i] {
 		case "--repo":
@@ -270,6 +308,8 @@ func executeDeployFromHistory(entry *history.Entry) error {
 			workflow = entry.Args[i+1]
 		case "--branch":
 			branch = entry.Args[i+1]
+		case "--input":
+			inputs = append(inputs, entry.Args[i+1])
 		}
 	}
 
@@ -278,7 +318,7 @@ func executeDeployFromHistory(entry *history.Entry) error {
 	}
 
 	ui.PrintStep("↻", fmt.Sprintf("Replaying: %s", entry.Label))
-	if err := triggerWorkflow(repo, workflow, branch); err != nil {
+	if err := triggerWorkflowWithInputs(repo, workflow, branch, inputs); err != nil {
 		return err
 	}
 
@@ -293,7 +333,7 @@ func listReposForOwner(owner string) ([]repoInfo, error) {
 	if owner != "" {
 		args = append(args, owner)
 	}
-	out, err := exec.Command("gh", args...).Output()
+	out, err := verbose.Cmd(exec.Command("gh", args...)).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +345,7 @@ func listReposForOwner(owner string) ([]repoInfo, error) {
 }
 
 func listOwners() []string {
-	userOut, err := exec.Command("gh", "api", "user", "--jq", ".login").Output()
+	userOut, err := verbose.Cmd(exec.Command("gh", "api", "user", "--jq", ".login")).Output()
 	if err != nil {
 		return nil
 	}
@@ -313,7 +353,7 @@ func listOwners() []string {
 
 	owners := []string{user}
 
-	orgsOut, err := exec.Command("gh", "api", "user/orgs", "--jq", ".[].login").Output()
+	orgsOut, err := verbose.Cmd(exec.Command("gh", "api", "user/orgs", "--jq", ".[].login")).Output()
 	if err == nil {
 		for _, org := range strings.Split(strings.TrimSpace(string(orgsOut)), "\n") {
 			org = strings.TrimSpace(org)
@@ -331,7 +371,7 @@ func selectDeployWorkflow(repo string) (fileName, displayName string, err error)
 		return flagWorkflow, flagWorkflow, nil
 	}
 
-	out, err := exec.Command("gh", "workflow", "list", "--repo", repo, "--json", "name,id,path,state").Output()
+	out, err := verbose.Cmd(exec.Command("gh", "workflow", "list", "--repo", repo, "--json", "name,id,path,state")).Output()
 	if err != nil {
 		return "", "", fmt.Errorf("failed to list workflows: %w", err)
 	}
@@ -376,8 +416,8 @@ func selectBranch(repo string) (string, error) {
 		return flagBranch, nil
 	}
 
-	out, err := exec.Command("gh", "api", fmt.Sprintf("repos/%s/branches", repo),
-		"--jq", ".[].name", "--paginate").Output()
+	out, err := verbose.Cmd(exec.Command("gh", "api", fmt.Sprintf("repos/%s/branches", repo),
+		"--jq", ".[].name", "--paginate")).Output()
 	if err != nil {
 		branch, err := ui.Input("Branch name", "main")
 		if err != nil {
@@ -405,16 +445,16 @@ func selectBranch(repo string) (string, error) {
 	return ui.Select("Select branch", cleaned)
 }
 
-func triggerWorkflow(repo, workflow, branch string) error {
+func triggerWorkflowWithInputs(repo, workflow, branch string, inputs []string) error {
 	ghArgs := []string{"workflow", "run", workflow, "--repo", repo, "--ref", branch}
 
-	for _, input := range flagInputs {
+	for _, input := range inputs {
 		ghArgs = append(ghArgs, "--field", input)
 	}
 
 	ui.PrintStep("▶", fmt.Sprintf("Triggering %s on %s (branch: %s)", workflow, repo, branch))
 
-	c := exec.Command("gh", ghArgs...)
+	c := verbose.Cmd(exec.Command("gh", ghArgs...))
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
@@ -432,12 +472,12 @@ func watchLatestRun(repo, workflow string) error {
 
 	time.Sleep(3 * time.Second)
 
-	out, err := exec.Command("gh", "run", "list",
+	out, err := verbose.Cmd(exec.Command("gh", "run", "list",
 		"--repo", repo,
 		"--workflow", workflow,
 		"--limit", "1",
 		"--json", "databaseId",
-		"-q", ".[0].databaseId").Output()
+		"-q", ".[0].databaseId")).Output()
 	if err != nil {
 		return fmt.Errorf("failed to get run ID: %w", err)
 	}
@@ -451,12 +491,12 @@ func watchLatestRun(repo, workflow string) error {
 	fmt.Println(ui.BoxStyle.Render("Press Ctrl+C to stop watching"))
 	fmt.Println()
 
-	c := exec.Command("gh", "run", "watch", runID, "--repo", repo, "--exit-status")
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	watchCmd := verbose.Cmd(exec.Command("gh", "run", "watch", runID, "--repo", repo, "--exit-status"))
+	watchCmd.Stdin = os.Stdin
+	watchCmd.Stdout = os.Stdout
+	watchCmd.Stderr = os.Stderr
 
-	if err := c.Run(); err != nil {
+	if err := watchCmd.Run(); err != nil {
 		ui.PrintError(fmt.Sprintf("Workflow run failed (run #%s)", runID))
 		fmt.Printf("\nView full logs: gh run view %s --repo %s --log\n", runID, repo)
 		return err
@@ -470,3 +510,113 @@ func extractWorkflowFile(path string) string {
 	parts := strings.Split(path, "/")
 	return parts[len(parts)-1]
 }
+
+// workflowInput represents a single input from workflow_dispatch.
+type workflowInput struct {
+	Description string   `yaml:"description"`
+	Required    bool     `yaml:"required"`
+	Default     string   `yaml:"default"`
+	Type        string   `yaml:"type"`
+	Options     []string `yaml:"options"`
+}
+
+// workflowFile represents the relevant parts of a GitHub Actions workflow YAML.
+type workflowFile struct {
+	On struct {
+		WorkflowDispatch struct {
+			Inputs map[string]workflowInput `yaml:"inputs"`
+		} `yaml:"workflow_dispatch"`
+	} `yaml:"on"`
+}
+
+// fetchWorkflowInputs retrieves the workflow file from GitHub and parses its inputs.
+func fetchWorkflowInputs(repo, workflowFileName string) (map[string]workflowInput, error) {
+	path := fmt.Sprintf(".github/workflows/%s", workflowFileName)
+	verbose.Log("fetching workflow file: %s from %s", path, repo)
+
+	out, err := verbose.Cmd(exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/contents/%s", repo, path),
+		"--jq", ".content")).Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch workflow file: %w", err)
+	}
+
+	content := strings.TrimSpace(string(out))
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(content, "\n", ""))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode workflow file: %w", err)
+	}
+
+	var wf workflowFile
+	if err := yaml.Unmarshal(decoded, &wf); err != nil {
+		return nil, fmt.Errorf("failed to parse workflow YAML: %w", err)
+	}
+
+	return wf.On.WorkflowDispatch.Inputs, nil
+}
+
+// promptWorkflowInputs interactively prompts the user for each workflow input.
+func promptWorkflowInputs(inputs map[string]workflowInput) ([]string, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+
+	// Collect input names in a stable order
+	var names []string
+	for name := range inputs {
+		names = append(names, name)
+	}
+	// Sort for consistent ordering
+	sort.Strings(names)
+
+	var result []string
+	for _, name := range names {
+		input := inputs[name]
+		label := name
+		if input.Description != "" {
+			label = fmt.Sprintf("%s (%s)", name, input.Description)
+		}
+
+		var value string
+		var err error
+
+		if input.Type == "choice" && len(input.Options) > 0 {
+			// Show select for choice inputs
+			options := input.Options
+			value, err = ui.Select(label, options)
+		} else if input.Type == "boolean" {
+			confirmed, confirmErr := ui.Confirm(label)
+			if confirmErr != nil {
+				return nil, confirmErr
+			}
+			if confirmed {
+				value = "true"
+			} else {
+				value = "false"
+			}
+			err = nil
+		} else {
+			// Text input with default as placeholder
+			placeholder := input.Default
+			if placeholder == "" {
+				placeholder = ""
+			}
+			value, err = ui.Input(label, placeholder)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		if value == "" && input.Default != "" {
+			value = input.Default
+		}
+
+		if value != "" {
+			result = append(result, fmt.Sprintf("%s=%s", name, value))
+		}
+	}
+
+	return result, nil
+}
+
