@@ -192,14 +192,21 @@ func selectRepoForOwner(owner string) (string, error) {
 	repos, err := listReposForOwner(owner)
 	if err != nil || len(repos) == 0 {
 		ui.PrintWarning(fmt.Sprintf("Could not list repositories for %s", owner))
-		repo, err := ui.Input("Repository (owner/repo)", owner+"/")
+		// Use Select with manual entry option so ESC works for back navigation
+		manualChoice, err := ui.Select("Repository not listed", []string{"Enter repository manually"})
 		if err != nil {
-			return "", err
+			return "", err // ESC → back to owner
 		}
-		if repo == "" {
-			return "", fmt.Errorf("no repository specified")
+		if manualChoice == "Enter repository manually" {
+			repo, err := ui.Input("Repository (owner/repo)", owner+"/")
+			if err != nil {
+				return "", err
+			}
+			if repo == "" {
+				return "", fmt.Errorf("no repository specified")
+			}
+			return repo, nil
 		}
-		return repo, nil
 	}
 
 	// Build options: strip owner prefix, add description
@@ -282,7 +289,7 @@ func executeDeployFromHistory(entry *history.Entry) error {
 }
 
 func listReposForOwner(owner string) ([]repoInfo, error) {
-	args := []string{"repo", "list", "--json", "nameWithOwner,description", "--sort", "updated", "--limit", "10"}
+	args := []string{"repo", "list", "--json", "nameWithOwner,description", "--limit", "10"}
 	if owner != "" {
 		args = append(args, owner)
 	}
