@@ -94,47 +94,148 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 1. Select repository
-	repo, err := selectRepo()
-	if err != nil {
-		return err
+	// Step-based navigation: ESC goes back to previous step
+	var owner, repo, workflow, workflowName, branch string
+
+	step := 0
+	if flagRepo != "" {
+		repo = flagRepo
+		step = 2 // skip owner + repo selection
 	}
 
-	// 2. Select workflow
-	workflow, workflowName, err := selectDeployWorkflow(repo)
-	if err != nil {
-		return err
+	for {
+		switch step {
+		case 0: // Select owner
+			o, err := selectOwner()
+			if err != nil {
+				return err // ESC → back to home
+			}
+			owner = o
+			step++
+
+		case 1: // Select repo
+			r, err := selectRepoForOwner(owner)
+			if err != nil {
+				step = 0 // ESC → back to owner
+				continue
+			}
+			repo = r
+			step++
+
+		case 2: // Select workflow
+			w, wn, err := selectDeployWorkflow(repo)
+			if err != nil {
+				if flagRepo != "" {
+					return err // can't go back if repo was a flag
+				}
+				step = 1 // ESC → back to repo
+				continue
+			}
+			workflow = w
+			workflowName = wn
+			step++
+
+		case 3: // Select branch
+			b, err := selectBranch(repo)
+			if err != nil {
+				step = 2 // ESC → back to workflow
+				continue
+			}
+			branch = b
+			step++
+
+		case 4: // Trigger
+			label := fmt.Sprintf("%s/%s @ %s", repo, workflowName, branch)
+			deployArgs := []string{"--repo", repo, "--workflow", workflow, "--branch", branch}
+			for _, input := range flagInputs {
+				deployArgs = append(deployArgs, "--input", input)
+			}
+
+			if err := triggerWorkflow(repo, workflow, branch); err != nil {
+				return err
+			}
+
+			if hist != nil {
+				hist.Add("deploy", label, deployArgs)
+				hist.Save() //nolint:errcheck
+			}
+
+			if flagWatch {
+				return watchLatestRun(repo, workflow)
+			}
+			return nil
+		}
+	}
+}
+
+func selectOwner() (string, error) {
+	owners := listOwners()
+	if len(owners) == 0 {
+		return "", fmt.Errorf("could not determine GitHub user/orgs")
+	}
+	if len(owners) == 1 {
+		return owners[0], nil
+	}
+	return ui.Select("Select owner", owners)
+}
+
+func selectRepoForOwner(owner string) (string, error) {
+	ui.PrintStep("◆", fmt.Sprintf("Organization: %s", owner))
+
+	// Try to detect current repo
+	var currentRepo string
+	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
+	if err == nil {
+		currentRepo = strings.TrimSpace(string(out))
 	}
 
-	// 3. Select branch
-	branch, err := selectBranch(repo)
-	if err != nil {
-		return err
+	repos, err := listReposForOwner(owner)
+	if err != nil || len(repos) == 0 {
+		ui.PrintWarning(fmt.Sprintf("Could not list repositories for %s", owner))
+		repo, err := ui.Input("Repository (owner/repo)", owner+"/")
+		if err != nil {
+			return "", err
+		}
+		if repo == "" {
+			return "", fmt.Errorf("no repository specified")
+		}
+		return repo, nil
 	}
 
-	// 4. Trigger
-	label := fmt.Sprintf("%s/%s @ %s", repo, workflowName, branch)
-	deployArgs := []string{"--repo", repo, "--workflow", workflow, "--branch", branch}
-	for _, input := range flagInputs {
-		deployArgs = append(deployArgs, "--input", input)
+	// Build options: strip owner prefix, add description
+	prefix := owner + "/"
+	maxNameLen := 0
+	for _, r := range repos {
+		name := strings.TrimPrefix(r.NameWithOwner, prefix)
+		if r.NameWithOwner == currentRepo {
+			name += " *"
+		}
+		if len(name) > maxNameLen {
+			maxNameLen = len(name)
+		}
 	}
 
-	if err := triggerWorkflow(repo, workflow, branch); err != nil {
-		return err
+	var options []ui.SelectOption
+	for _, r := range repos {
+		name := strings.TrimPrefix(r.NameWithOwner, prefix)
+		if r.NameWithOwner == currentRepo {
+			name += " *"
+		}
+		display := name
+		if r.Description != "" {
+			desc := r.Description
+			if len(desc) > 50 {
+				desc = desc[:47] + "..."
+			}
+			display = fmt.Sprintf("%-*s  %s", maxNameLen+1, name, desc)
+		}
+		options = append(options, ui.SelectOption{
+			Display: display,
+			Value:   r.NameWithOwner,
+		})
 	}
 
-	// Save to history
-	if hist != nil {
-		hist.Add("deploy", label, deployArgs)
-		hist.Save() //nolint:errcheck
-	}
-
-	// Watch logs if requested
-	if flagWatch {
-		return watchLatestRun(repo, workflow)
-	}
-
-	return nil
+	return ui.SelectWithOptions("Select repository", options)
 }
 
 func replayLast(hist *history.Store) error {
@@ -218,90 +319,6 @@ func listOwners() []string {
 	return owners
 }
 
-func selectRepo() (string, error) {
-	if flagRepo != "" {
-		return flagRepo, nil
-	}
-
-	// Try to detect from current git repo
-	var currentRepo string
-	out, err := exec.Command("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Output()
-	if err == nil {
-		currentRepo = strings.TrimSpace(string(out))
-	}
-
-	// List owners (user + orgs)
-	owners := listOwners()
-
-	// Select owner first
-	var selectedOwner string
-	if len(owners) > 1 {
-		selected, err := ui.Select("Select owner", owners)
-		if err != nil {
-			return "", err
-		}
-		selectedOwner = selected
-	} else if len(owners) == 1 {
-		selectedOwner = owners[0]
-	}
-
-	ui.PrintStep("◆", fmt.Sprintf("Organization: %s", selectedOwner))
-
-	// List repos for the selected owner (top 10 most active)
-	repos, err := listReposForOwner(selectedOwner)
-	if err != nil || len(repos) == 0 {
-		ui.PrintWarning(fmt.Sprintf("Could not list repositories for %s", selectedOwner))
-		repo, err := ui.Input("Repository (owner/repo)", selectedOwner+"/")
-		if err != nil {
-			return "", err
-		}
-		if repo == "" {
-			return "", fmt.Errorf("no repository specified")
-		}
-		return repo, nil
-	}
-
-	// Build options: strip owner prefix, add description
-	prefix := selectedOwner + "/"
-	maxNameLen := 0
-	for _, r := range repos {
-		name := strings.TrimPrefix(r.NameWithOwner, prefix)
-		if r.NameWithOwner == currentRepo {
-			name += " *"
-		}
-		if len(name) > maxNameLen {
-			maxNameLen = len(name)
-		}
-	}
-
-	var options []ui.SelectOption
-	for _, r := range repos {
-		name := strings.TrimPrefix(r.NameWithOwner, prefix)
-		if r.NameWithOwner == currentRepo {
-			name += " *"
-		}
-		display := name
-		if r.Description != "" {
-			desc := r.Description
-			if len(desc) > 50 {
-				desc = desc[:47] + "..."
-			}
-			display = fmt.Sprintf("%-*s  %s", maxNameLen+1, name, desc)
-		}
-		options = append(options, ui.SelectOption{
-			Display: display,
-			Value:   r.NameWithOwner,
-		})
-	}
-
-	selected, err := ui.SelectWithOptions("Select repository", options)
-	if err != nil {
-		return "", err
-	}
-
-	return selected, nil
-}
-
 func selectDeployWorkflow(repo string) (fileName, displayName string, err error) {
 	if flagWorkflow != "" {
 		return flagWorkflow, flagWorkflow, nil
@@ -378,12 +395,7 @@ func selectBranch(repo string) (string, error) {
 		return "main", nil
 	}
 
-	selected, err := ui.Select("Select branch", cleaned)
-	if err != nil {
-		return "", err
-	}
-
-	return selected, nil
+	return ui.Select("Select branch", cleaned)
 }
 
 func triggerWorkflow(repo, workflow, branch string) error {

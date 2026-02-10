@@ -47,12 +47,10 @@ func init() {
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
-	// 0. Check required dependencies
 	if err := awsutil.CheckDependencies(); err != nil {
 		return err
 	}
 
-	// Replay last or show history
 	if flagConnectLast {
 		return replayLastConnect()
 	}
@@ -68,63 +66,84 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 1. Select AWS profile
-	profile, err := selectProfile()
-	if err != nil {
-		return err
+	// Step-based navigation: ESC goes back to previous step
+	var profile, cluster, service, task, container string
+	var client *ecs.Client
+
+	step := 0
+	for {
+		switch step {
+		case 0: // Select profile
+			p, err := selectProfile()
+			if err != nil {
+				return err // ESC at first step → back to home
+			}
+			profile = p
+			step++
+
+		case 1: // SSO + create client
+			if err := awsutil.EnsureSSOLogin(profile); err != nil {
+				return err
+			}
+			c, err := ecs.NewClient(profile, flagRegion)
+			if err != nil {
+				return fmt.Errorf("failed to create AWS client: %w", err)
+			}
+			client = c
+			step++
+
+		case 2: // Select cluster
+			c, err := selectCluster(client)
+			if err != nil {
+				step = 0 // ESC → back to profile
+				continue
+			}
+			cluster = c
+			step++
+
+		case 3: // Select service
+			s, err := selectService(client, cluster)
+			if err != nil {
+				step = 2 // ESC → back to cluster
+				continue
+			}
+			service = s
+			step++
+
+		case 4: // Get task + select container
+			t, err := client.GetRunningTask(cmd.Context(), cluster, service)
+			if err != nil {
+				ui.PrintWarning(fmt.Sprintf("No running task for %s: %s", service, err))
+				step = 3 // back to service
+				continue
+			}
+			task = t
+
+			cont, err := selectContainer(client, cmd, cluster, task)
+			if err != nil {
+				step = 3 // ESC → back to service
+				continue
+			}
+			container = cont
+			step++
+
+		case 5: // Execute
+			shell := resolveShell()
+
+			hist, _ := history.Load()
+			if hist != nil {
+				label := fmt.Sprintf("%s → %s/%s/%s", profile, cluster, service, container)
+				hist.Add("connect", label, []string{
+					"--profile", profile, "--cluster", cluster,
+					"--service", service, "--container", container,
+				})
+				hist.Save() //nolint:errcheck
+			}
+
+			ui.PrintStep("▶", fmt.Sprintf("Connecting to %s/%s/%s", cluster, service, container))
+			return client.ExecInteractive(cmd.Context(), cluster, task, container, shell, profile)
+		}
 	}
-
-	// 2. Ensure SSO session is valid (auto-login if expired)
-	if err := awsutil.EnsureSSOLogin(profile); err != nil {
-		return err
-	}
-
-	client, err := ecs.NewClient(profile, flagRegion)
-	if err != nil {
-		return fmt.Errorf("failed to create AWS client: %w", err)
-	}
-
-	// 1. Select cluster
-	cluster, err := selectCluster(client)
-	if err != nil {
-		return err
-	}
-
-	// 2. Select service
-	service, err := selectService(client, cluster)
-	if err != nil {
-		return err
-	}
-
-	// 3. Get a running task
-	task, err := client.GetRunningTask(cmd.Context(), cluster, service)
-	if err != nil {
-		return fmt.Errorf("no running task found: %w", err)
-	}
-
-	// 4. Select container
-	container, err := selectContainer(client, cmd, cluster, task)
-	if err != nil {
-		return err
-	}
-
-	// 5. Determine shell
-	shell := resolveShell()
-
-	// 6. Save to history
-	hist, _ := history.Load()
-	if hist != nil {
-		label := fmt.Sprintf("%s → %s/%s/%s", profile, cluster, service, container)
-		hist.Add("connect", label, []string{
-			"--profile", profile, "--cluster", cluster,
-			"--service", service, "--container", container,
-		})
-		hist.Save() //nolint:errcheck
-	}
-
-	// 7. Execute
-	ui.PrintStep("▶", fmt.Sprintf("Connecting to %s/%s/%s", cluster, service, container))
-	return client.ExecInteractive(cmd.Context(), cluster, task, container, shell, profile)
 }
 
 func selectCluster(client *ecs.Client) (string, error) {
@@ -141,12 +160,7 @@ func selectCluster(client *ecs.Client) (string, error) {
 		return "", fmt.Errorf("no ECS clusters found")
 	}
 
-	selected, err := ui.Select("Select cluster", clusters)
-	if err != nil {
-		return "", err
-	}
-
-	return selected, nil
+	return ui.Select("Select cluster", clusters)
 }
 
 func selectService(client *ecs.Client, cluster string) (string, error) {
@@ -163,12 +177,7 @@ func selectService(client *ecs.Client, cluster string) (string, error) {
 		return "", fmt.Errorf("no services found in cluster %s", cluster)
 	}
 
-	selected, err := ui.Select("Select service", services)
-	if err != nil {
-		return "", err
-	}
-
-	return selected, nil
+	return ui.Select("Select service", services)
 }
 
 func selectContainer(client *ecs.Client, cmd *cobra.Command, cluster, task string) (string, error) {
@@ -198,12 +207,7 @@ func selectContainer(client *ecs.Client, cmd *cobra.Command, cluster, task strin
 		return containers[0], nil
 	}
 
-	selected, err := ui.Select("Select container", containers)
-	if err != nil {
-		return "", err
-	}
-
-	return selected, nil
+	return ui.Select("Select container", containers)
 }
 
 func selectProfile() (string, error) {
@@ -225,12 +229,7 @@ func selectProfile() (string, error) {
 		return profiles[0], nil
 	}
 
-	selected, err := ui.Select("Select AWS profile", profiles)
-	if err != nil {
-		return "", err
-	}
-
-	return selected, nil
+	return ui.Select("Select AWS profile", profiles)
 }
 
 func resolveShell() string {
@@ -251,7 +250,6 @@ func showConnectHistory() (*history.Entry, error) {
 		return nil, nil
 	}
 
-	// Keep only the 10 most recent
 	if len(labels) > 10 {
 		labels = labels[:10]
 	}

@@ -16,6 +16,7 @@ var (
 	// Theme colors
 	Primary   = lipgloss.Color("#7C3AED")
 	Secondary = lipgloss.Color("#A78BFA")
+	Accent    = lipgloss.Color("#22D3EE") // Cyan — used for interactive elements
 	Success   = lipgloss.Color("#10B981")
 	Warning   = lipgloss.Color("#F59E0B")
 	Error     = lipgloss.Color("#EF4444")
@@ -52,38 +53,37 @@ var (
 			Bold(true)
 )
 
-// devTheme returns a custom huh theme with wheel picker focus effect.
+// devTheme returns a custom huh theme — cyan accent, no purple.
 func devTheme() *huh.Theme {
 	t := huh.ThemeBase()
 
-	// Remove the left border for a cleaner look
 	t.Focused.Base = lipgloss.NewStyle().PaddingLeft(1)
 	t.Focused.Card = t.Focused.Base
 
-	// Title
-	t.Focused.Title = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	// Title in white bold
+	t.Focused.Title = lipgloss.NewStyle().Foreground(Text).Bold(true)
 
-	// Select: bright white for selected item, muted for the rest
-	t.Focused.SelectSelector = lipgloss.NewStyle().Foreground(Primary).SetString("› ")
-	t.Focused.SelectedOption = lipgloss.NewStyle().Foreground(Text).Bold(true)
+	// Select: cyan arrow, white selected, gray others
+	t.Focused.SelectSelector = lipgloss.NewStyle().Foreground(Accent).SetString("▸ ")
+	t.Focused.SelectedOption = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	t.Focused.UnselectedOption = lipgloss.NewStyle().Foreground(Muted)
 	t.Focused.Option = lipgloss.NewStyle().Foreground(Muted)
 
 	// Scroll indicators
-	t.Focused.NextIndicator = lipgloss.NewStyle().Foreground(Secondary).SetString("  ↓")
-	t.Focused.PrevIndicator = lipgloss.NewStyle().Foreground(Secondary).SetString("  ↑")
+	t.Focused.NextIndicator = lipgloss.NewStyle().Foreground(Muted).SetString("  ↓")
+	t.Focused.PrevIndicator = lipgloss.NewStyle().Foreground(Muted).SetString("  ↑")
 
 	// Filter input
-	t.Focused.TextInput.Cursor = lipgloss.NewStyle().Foreground(Primary)
+	t.Focused.TextInput.Cursor = lipgloss.NewStyle().Foreground(Accent)
 	t.Focused.TextInput.Placeholder = lipgloss.NewStyle().Foreground(Muted)
-	t.Focused.TextInput.Prompt = lipgloss.NewStyle().Foreground(Secondary).SetString("/ ")
+	t.Focused.TextInput.Prompt = lipgloss.NewStyle().Foreground(Accent).SetString("/ ")
 	t.Focused.TextInput.Text = lipgloss.NewStyle().Foreground(Text)
 
 	// Buttons
-	t.Focused.FocusedButton = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF")).Background(Primary).Padding(0, 1)
+	t.Focused.FocusedButton = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF")).Background(Accent).Padding(0, 1)
 	t.Focused.BlurredButton = lipgloss.NewStyle().Foreground(Muted).Background(lipgloss.Color("#333")).Padding(0, 1)
 
-	// Blurred = same but hidden border
+	// Blurred = same but no indicators
 	t.Blurred = t.Focused
 	t.Blurred.Base = lipgloss.NewStyle().PaddingLeft(1)
 	t.Blurred.Card = t.Blurred.Base
@@ -94,12 +94,13 @@ func devTheme() *huh.Theme {
 }
 
 func selectHeight(count int) int {
-	h := count + 4
-	if h > 15 {
-		h = 15
+	// Generous height so all items stay visible
+	if count <= 8 {
+		return count + 6
 	}
-	if h < 8 {
-		h = 8
+	h := count + 5
+	if h > 20 {
+		h = 20
 	}
 	return h
 }
@@ -110,7 +111,8 @@ type SelectOption struct {
 	Value   string
 }
 
-// Select displays an interactive selection prompt with type-to-filter.
+// Select displays an interactive selection prompt.
+// Filtering is enabled only for lists > 8 items.
 func Select(label string, options []string) (string, error) {
 	var selected string
 
@@ -119,12 +121,14 @@ func Select(label string, options []string) (string, error) {
 		huhOptions[i] = huh.NewOption(opt, opt)
 	}
 
+	filtering := len(options) > 8
+
 	sel := huh.NewSelect[string]().
 		Title(label).
 		Options(huhOptions...).
 		Value(&selected).
 		Height(selectHeight(len(options))).
-		Filtering(true)
+		Filtering(filtering)
 
 	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
@@ -143,12 +147,14 @@ func SelectWithOptions(label string, options []SelectOption) (string, error) {
 		huhOptions[i] = huh.NewOption(opt.Display, opt.Value)
 	}
 
+	filtering := len(options) > 8
+
 	sel := huh.NewSelect[string]().
 		Title(label).
 		Options(huhOptions...).
 		Value(&selected).
 		Height(selectHeight(len(options))).
-		Filtering(true)
+		Filtering(filtering)
 
 	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
@@ -202,7 +208,9 @@ const bannerArt = `
 func PrintBanner(version string) {
 	fmt.Println(BannerStyle.Render(bannerArt))
 	fmt.Println()
-	fmt.Println(MutedStyle.Render(fmt.Sprintf("  v%s — Focus on coding, not on tooling.", version)))
+	versionPart := MutedStyle.Render(fmt.Sprintf("  v%s", version))
+	sloganPart := lipgloss.NewStyle().Foreground(Text).Render(" — Focus on coding, not on tooling.")
+	fmt.Println(versionPart + sloganPart)
 	fmt.Println(MutedStyle.Render("  Michael COULLERET, Thomas Talbot and contributors."))
 	fmt.Println()
 }
@@ -218,15 +226,16 @@ func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, er
 	fmt.Println(BannerStyle.Render(bannerArt))
 	fmt.Println()
 
-	versionText := MutedStyle.Render(fmt.Sprintf("  v%s — Focus on coding, not on tooling.", version))
+	versionPart := MutedStyle.Render(fmt.Sprintf("  v%s", version))
+	sloganPart := lipgloss.NewStyle().Foreground(Text).Render(" — Focus on coding, not on tooling.")
+	versionText := versionPart + sloganPart
 
 	var result *UpdateResult
 
 	if checkFn != nil {
-		// Show discreet loading indicator on the version line
-		fmt.Printf("%s  %s", versionText, MutedStyle.Render("⟳ checking..."))
+		// Show discreet loading indicator
+		fmt.Printf("%s  %s", versionText, MutedStyle.Render("⟳"))
 
-		// Run check with timeout
 		type checkResult struct {
 			latest    string
 			hasUpdate bool
@@ -245,7 +254,7 @@ func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, er
 			cr = checkResult{err: fmt.Errorf("timeout")}
 		}
 
-		// Clear the line and reprint with status
+		// Clear line, reprint with status
 		fmt.Print("\r\033[K")
 
 		if cr.err != nil {
@@ -262,7 +271,9 @@ func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, er
 
 	fmt.Println(MutedStyle.Render("  Michael COULLERET, Thomas Talbot and contributors."))
 	fmt.Println()
-	fmt.Println(MutedStyle.Render("  Usage: devcli [command] [options]"))
+	usageLabel := lipgloss.NewStyle().Foreground(Text).Bold(true).Render("  Usage:")
+	usageDetail := MutedStyle.Render(" devcli [command] [options]")
+	fmt.Println(usageLabel + usageDetail)
 	fmt.Println()
 
 	return result
