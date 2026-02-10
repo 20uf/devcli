@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -94,6 +95,9 @@ func showHome(cmd *cobra.Command) {
 			ui.PrintError(fmt.Sprintf("Command not found: %s", selected))
 			continue
 		}
+
+		// Set context so cmd.Context() is not nil when called from home
+		subcmd.SetContext(context.Background())
 
 		var runErr error
 		if subcmd.RunE != nil {
