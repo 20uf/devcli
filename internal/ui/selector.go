@@ -112,7 +112,6 @@ type SelectOption struct {
 }
 
 // Select displays an interactive selection prompt.
-// Filtering is enabled only for lists > 8 items.
 func Select(label string, options []string) (string, error) {
 	var selected string
 
@@ -121,14 +120,12 @@ func Select(label string, options []string) (string, error) {
 		huhOptions[i] = huh.NewOption(opt, opt)
 	}
 
-	filtering := len(options) > 8
-
 	sel := huh.NewSelect[string]().
 		Title(label).
 		Options(huhOptions...).
 		Value(&selected).
 		Height(selectHeight(len(options))).
-		Filtering(filtering)
+		Filtering(false)
 
 	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
@@ -147,14 +144,12 @@ func SelectWithOptions(label string, options []SelectOption) (string, error) {
 		huhOptions[i] = huh.NewOption(opt.Display, opt.Value)
 	}
 
-	filtering := len(options) > 8
-
 	sel := huh.NewSelect[string]().
 		Title(label).
 		Options(huhOptions...).
 		Value(&selected).
 		Height(selectHeight(len(options))).
-		Filtering(filtering)
+		Filtering(false)
 
 	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
