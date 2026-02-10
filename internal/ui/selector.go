@@ -63,9 +63,9 @@ func devTheme() *huh.Theme {
 	// Title
 	t.Focused.Title = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 
-	// Select: wheel picker effect — bright cursor, muted rest
+	// Select: bright white for selected item, muted for the rest
 	t.Focused.SelectSelector = lipgloss.NewStyle().Foreground(Primary).SetString("› ")
-	t.Focused.SelectedOption = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	t.Focused.SelectedOption = lipgloss.NewStyle().Foreground(Text).Bold(true)
 	t.Focused.UnselectedOption = lipgloss.NewStyle().Foreground(Muted)
 	t.Focused.Option = lipgloss.NewStyle().Foreground(Muted)
 
@@ -94,12 +94,12 @@ func devTheme() *huh.Theme {
 }
 
 func selectHeight(count int) int {
-	h := count + 2
+	h := count + 4
 	if h > 15 {
 		h = 15
 	}
-	if h < 5 {
-		h = 5
+	if h < 8 {
+		h = 8
 	}
 	return h
 }
