@@ -104,6 +104,12 @@ git tag v1.0.0
 git push --tags
 ```
 
+## Roadmap
+
+- [ ] **Connect BDD** — Se connecter à une base de données dans un cluster (même UX que connect)
+- [ ] **Consulter SSM** — Naviguer et lire les paramètres AWS SSM Parameter Store (lecture seule)
+- [ ] **CodePipeline** — Déclencher un pipeline CodePipeline et suivre son exécution en temps réel
+
 ## Contributors
 
 A special thanks to all contributors:
