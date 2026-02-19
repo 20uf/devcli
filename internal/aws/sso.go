@@ -86,3 +86,20 @@ func FormatSSOError(err error, profile string) string {
 	}
 	return msg
 }
+
+// ForceSSOLogin triggers SSO login unconditionally (skips the identity check).
+func ForceSSOLogin(profile string) error {
+	fmt.Printf("Refreshing SSO session for profile %q...\n", profile)
+
+	login := verbose.Cmd(exec.Command("aws", "sso", "login", "--profile", profile))
+	login.Stdin = os.Stdin
+	login.Stdout = os.Stdout
+	login.Stderr = os.Stderr
+
+	if err := login.Run(); err != nil {
+		return fmt.Errorf("SSO login failed: %w", err)
+	}
+
+	fmt.Println("SSO login successful.")
+	return nil
+}

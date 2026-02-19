@@ -2,15 +2,16 @@ module github.com/20uf/devcli
 
 go 1.24.2
 
+toolchain go1.24.7
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/service/ecs v1.71.0
-	github.com/charmbracelet/huh v0.7.0
+	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/mod v0.17.0
+	golang.org/x/mod v0.32.0
 	gopkg.in/ini.v1 v1.67.1
 )
 
@@ -30,7 +31,7 @@ require (
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
-	github.com/charmbracelet/bubbles v0.21.0 // indirect
+	github.com/charmbracelet/bubbles v0.21.1 // indirect
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/x/ansi v0.11.5 // indirect
@@ -56,4 +57,5 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
