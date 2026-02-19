@@ -150,7 +150,7 @@ func setupZsh() error {
 	if err != nil {
 		return fmt.Errorf("failed to create %s: %w", completionFile, err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	if err := rootCmd.GenZshCompletion(f); err != nil {
 		return err
@@ -208,7 +208,7 @@ func writeCompletionFile(path, shell string) error {
 		// Try with sudo for system directories
 		return writeCompletionWithSudo(path, shell)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	switch shell {
 	case "bash":
@@ -232,16 +232,16 @@ func writeCompletionWithSudo(path, shell string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmpFile.Name())
+	defer os.Remove(tmpFile.Name()) //nolint:errcheck
 
 	switch shell {
 	case "bash":
 		if err := rootCmd.GenBashCompletion(tmpFile); err != nil {
-			tmpFile.Close()
+			tmpFile.Close() //nolint:errcheck
 			return err
 		}
 	}
-	tmpFile.Close()
+	tmpFile.Close() //nolint:errcheck
 
 	c := exec.Command("sudo", "cp", tmpFile.Name(), path)
 	c.Stdin = os.Stdin
@@ -282,7 +282,7 @@ func ensureLineInFile(path, line, marker string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	_, err = fmt.Fprintf(f, "\n# devcli shell completion\n%s\n", line)
 	return err
