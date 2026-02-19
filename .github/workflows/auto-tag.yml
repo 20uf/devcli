@@ -1,0 +1,99 @@
+name: Auto Tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    # Skip if commit is from auto-tag itself
+    if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: latest
+        run: |
+          tag=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          if [ -z "$tag" ]; then
+            tag="v0.0.0"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Latest tag: $tag"
+
+      - name: Determine version bump from commits
+        id: bump
+        run: |
+          latest="${{ steps.latest.outputs.tag }}"
+
+          # Get commits since last tag
+          if git rev-parse "$latest" >/dev/null 2>&1; then
+            commits=$(git log "$latest"..HEAD --pretty=format:"%s")
+          else
+            commits=$(git log --pretty=format:"%s")
+          fi
+
+          echo "Commits since $latest:"
+          echo "$commits"
+
+          # Determine bump type from conventional commits
+          bump="none"
+          if echo "$commits" | grep -qE "^feat(\(.*\))?!:|^fix(\(.*\))?!:|BREAKING CHANGE"; then
+            bump="major"
+          elif echo "$commits" | grep -qE "^feat(\(.*\))?:"; then
+            bump="minor"
+          elif echo "$commits" | grep -qE "^fix(\(.*\))?:|^perf(\(.*\))?:|^refactor(\(.*\))?:"; then
+            bump="patch"
+          fi
+
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+          echo "Bump type: $bump"
+
+      - name: Calculate next version
+        id: next
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          latest="${{ steps.latest.outputs.tag }}"
+          bump="${{ steps.bump.outputs.bump }}"
+
+          # Strip v prefix and pre-release suffix
+          version="${latest#v}"
+          version="${version%%-*}"
+
+          # Split into major.minor.patch
+          IFS='.' read -r major minor patch <<< "$version"
+          major=${major:-0}
+          minor=${minor:-0}
+          patch=${patch:-0}
+
+          case "$bump" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          next="v${major}.${minor}.${patch}"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next"
+
+      - name: Update VERSION and create tag
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          version="${{ steps.next.outputs.version }}"
+          version_no_v="${version#v}"
+
+          echo "$version_no_v" > VERSION
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add VERSION
+          git commit -m "chore: release ${version}"
+          git tag -a "$version" -m "Release ${version}"
+          git push origin main --follow-tags
