@@ -165,7 +165,7 @@ func TestStatusOrchestrator_ListActive(t *testing.T) {
 
 	// Complete one
 	td1.UpdateConclusion(domain.RunConclusionSuccess)
-	tracker.Save(ctx, td1)
+	_ = tracker.Save(ctx, td1)
 
 	// List active
 	active, err := orchestrator.ListActive(ctx)
@@ -193,7 +193,7 @@ func TestStatusOrchestrator_GetTracked(t *testing.T) {
 	orchestrator := NewStatusOrchestrator(tracker, runs)
 
 	workflow, _ := domain.NewWorkflow("deploy.yml")
-	orchestrator.TrackDeployment(ctx, "run-1", workflow, "main", "owner/repo")
+	_, _ = orchestrator.TrackDeployment(ctx, "run-1", workflow, "main", "owner/repo")
 
 	td, err := orchestrator.GetTracked(ctx, "run-1")
 
@@ -202,7 +202,7 @@ func TestStatusOrchestrator_GetTracked(t *testing.T) {
 	}
 
 	if td == nil {
-		t.Errorf("Tracked deployment should not be nil")
+		t.Fatalf("Tracked deployment should not be nil")
 	}
 
 	if td.ID() != "run-1" {
@@ -220,7 +220,7 @@ func TestStatusOrchestrator_DismissTracked(t *testing.T) {
 	orchestrator := NewStatusOrchestrator(tracker, runs)
 
 	workflow, _ := domain.NewWorkflow("deploy.yml")
-	orchestrator.TrackDeployment(ctx, "run-1", workflow, "main", "owner/repo")
+	_, _ = orchestrator.TrackDeployment(ctx, "run-1", workflow, "main", "owner/repo")
 
 	// Dismiss it
 	err := orchestrator.DismissTracked(ctx, "run-1")
@@ -280,7 +280,7 @@ func TestStatusOrchestrator_DeploymentLifecycle(t *testing.T) {
 
 	// 3. Complete it
 	td2.UpdateConclusion(domain.RunConclusionSuccess)
-	tracker.Save(ctx, *td2)
+	_ = tracker.Save(ctx, *td2)
 
 	// 4. Verify not in active
 	active, _ := orchestrator.ListActive(ctx)
@@ -289,7 +289,7 @@ func TestStatusOrchestrator_DeploymentLifecycle(t *testing.T) {
 	}
 
 	// 5. Dismiss
-	orchestrator.DismissTracked(ctx, "run-1")
+	_ = orchestrator.DismissTracked(ctx, "run-1")
 
 	// 6. Verify gone
 	td3, _ := orchestrator.GetTracked(ctx, "run-1")

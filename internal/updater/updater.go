@@ -44,7 +44,7 @@ func checkStable(currentVersion string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("failed to fetch latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("no stable release found (status %d)", resp.StatusCode)
@@ -63,7 +63,7 @@ func checkAll(currentVersion string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("failed to fetch releases: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
@@ -123,7 +123,7 @@ func fetchRelease(version string) (*githubRelease, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("release %s not found (status %d)", tag, resp.StatusCode)
@@ -142,7 +142,7 @@ func downloadAndReplace(url string) error {
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download returned status %d", resp.StatusCode)
@@ -157,13 +157,13 @@ func downloadAndReplace(url string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer os.Remove(tmpFile.Name()) //nolint:errcheck
 
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
+		tmpFile.Close() //nolint:errcheck
 		return fmt.Errorf("failed to write update: %w", err)
 	}
-	tmpFile.Close()
+	tmpFile.Close() //nolint:errcheck
 
 	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
 		return fmt.Errorf("failed to set permissions: %w", err)

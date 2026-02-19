@@ -232,7 +232,7 @@ func TestE2E_DeployThenTrack(t *testing.T) {
 
 	// Phase 4: Complete deployment
 	tracked.UpdateConclusion(domain.RunConclusionSuccess)
-	tracker.Save(ctx, tracked)
+	_ = tracker.Save(ctx, tracked)
 
 	// Phase 5: Verify completed
 	completed, _ := statusOrch.GetTracked(ctx, tracked.ID())

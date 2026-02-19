@@ -23,7 +23,6 @@ type Input struct {
 	value     string        // The actual value provided by user
 	required  bool
 	options   []string      // For choice type: allowed values
-	default_  *string       // Default value (optional)
 }
 
 // NewInput creates a new typed Input value object.

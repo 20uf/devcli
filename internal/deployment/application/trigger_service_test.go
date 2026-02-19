@@ -219,7 +219,7 @@ func TestTriggerDeploymentOrchestrator_PrepareDeployment_InputValidation(t *test
 	workflow, _ := domain.NewWorkflow("deploy.yml")
 
 	envInput, _ := domain.NewChoiceInput("environment", "", []string{"dev", "staging", "prod"}, true)
-	envInput.SetValue("prod") // Valid choice
+	_ = envInput.SetValue("prod") // Valid choice
 
 	repos := &domain.AllRepositories{
 		Deployments: &MockDeploymentRepository{},

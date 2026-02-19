@@ -15,10 +15,6 @@ func TestDeployHandler_Init(t *testing.T) {
 		t.Fatalf("Failed to initialize handler: %v", err)
 	}
 
-	if handler == nil {
-		t.Errorf("Handler is nil")
-	}
-
 	if handler.orchestrator == nil {
 		t.Errorf("Orchestrator not initialized")
 	}
@@ -46,10 +42,8 @@ func TestDeployHandler_NonInteractive_AllFlags(t *testing.T) {
 	inputFlags := []string{"environment=prod", "skip_tests=true"}
 	watchFlag := false
 
-	err = handler.Handle(cmd, workflowFlag, branchFlag, inputFlags, watchFlag, "owner/repo")
+	_ = handler.Handle(cmd, workflowFlag, branchFlag, inputFlags, watchFlag, "owner/repo")
 
-	// Should process without UI prompts
-	// May fail due to GitHub API but shouldn't be UI-related
 	t.Log("✓ Non-interactive mode with all flags processed")
 }
 
@@ -345,9 +339,8 @@ func TestDeployHandler_InteractiveFlow(t *testing.T) {
 	cmd.SetContext(context.Background())
 
 	// No workflow flag → forces interactive selection
-	err = handler.Handle(cmd, "", "", []string{}, false, "owner/repo")
+	_ = handler.Handle(cmd, "", "", []string{}, false, "owner/repo")
 
-	// Should initiate interactive flow (would prompt in real use)
 	t.Log("✓ Interactive flow initiated")
 }
 

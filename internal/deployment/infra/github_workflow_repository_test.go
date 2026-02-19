@@ -8,13 +8,6 @@ import (
 	"github.com/20uf/devcli/internal/deployment/domain"
 )
 
-// Test helpers
-
-type mockExecCmd struct {
-	output string
-	err    error
-}
-
 // TestGitHubWorkflowRepository_ListWorkflows tests listing workflows.
 func TestGitHubWorkflowRepository_ListWorkflows(t *testing.T) {
 	tests := []struct {
