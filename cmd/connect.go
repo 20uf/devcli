@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -241,11 +242,14 @@ func selectProfile() (string, error) {
 
 	profiles, err := awsutil.ListProfiles()
 	if err != nil {
+		if errors.Is(err, awsutil.ErrNoConfigFile) {
+			return "", fmt.Errorf("no AWS configuration found (~/.aws/config does not exist)\n\n  Run: aws configure sso\n  Doc: https://docs.aws.amazon.com/cli/latest/userguide/sso-configure-profile-token.html")
+		}
 		return "", fmt.Errorf("failed to list AWS profiles: %w", err)
 	}
 
 	if len(profiles) == 0 {
-		return "", fmt.Errorf("no AWS profiles found in ~/.aws/config")
+		return "", fmt.Errorf("no AWS profiles found in ~/.aws/config\n\n  Run: aws configure sso\n  Doc: https://docs.aws.amazon.com/cli/latest/userguide/sso-configure-profile-token.html")
 	}
 
 	if len(profiles) == 1 {

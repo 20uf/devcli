@@ -42,6 +42,9 @@ func IsSSO(profile string) bool {
 
 // EnsureSSOLogin checks if the SSO session is valid. If not, triggers aws sso login.
 func EnsureSSOLogin(profile string) error {
+	if profile == "" {
+		return fmt.Errorf("no AWS profile configured\n\n  Run: aws configure sso\n  Doc: https://docs.aws.amazon.com/cli/latest/userguide/sso-configure-profile-token.html")
+	}
 	if !IsSSO(profile) {
 		return nil
 	}
@@ -89,6 +92,9 @@ func FormatSSOError(err error, profile string) string {
 
 // ForceSSOLogin triggers SSO login unconditionally (skips the identity check).
 func ForceSSOLogin(profile string) error {
+	if profile == "" {
+		return fmt.Errorf("no AWS profile configured, cannot re-authenticate\n\n  Run: aws configure sso\n  Doc: https://docs.aws.amazon.com/cli/latest/userguide/sso-configure-profile-token.html")
+	}
 	fmt.Printf("Refreshing SSO session for profile %q...\n", profile)
 
 	login := verbose.Cmd(exec.Command("aws", "sso", "login", "--profile", profile))

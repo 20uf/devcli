@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,6 +9,9 @@ import (
 
 	"gopkg.in/ini.v1"
 )
+
+// ErrNoConfigFile is returned when ~/.aws/config does not exist.
+var ErrNoConfigFile = errors.New("AWS config file not found")
 
 // ListProfiles returns all profile names from ~/.aws/config.
 func ListProfiles() ([]string, error) {
@@ -18,6 +22,10 @@ func ListProfiles() ([]string, error) {
 			return nil, err
 		}
 		configPath = filepath.Join(home, ".aws", "config")
+	}
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return nil, ErrNoConfigFile
 	}
 
 	cfg, err := ini.Load(configPath)
