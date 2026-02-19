@@ -3,10 +3,8 @@ package ui
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -18,7 +16,7 @@ var (
 	// Theme colors
 	Primary   = lipgloss.Color("#7C3AED")
 	Secondary = lipgloss.Color("#A78BFA")
-	Accent    = lipgloss.Color("#22D3EE")
+	Accent    = lipgloss.Color("#22D3EE") // Cyan — used for interactive elements
 	Success   = lipgloss.Color("#10B981")
 	Warning   = lipgloss.Color("#F59E0B")
 	Error     = lipgloss.Color("#EF4444")
@@ -55,201 +53,144 @@ var (
 			Bold(true)
 )
 
+// devTheme returns a custom huh theme — cyan accent, no purple.
+func devTheme() *huh.Theme {
+	t := huh.ThemeBase()
+
+	t.Focused.Base = lipgloss.NewStyle().PaddingLeft(1)
+	t.Focused.Card = t.Focused.Base
+
+	// Title in white bold
+	t.Focused.Title = lipgloss.NewStyle().Foreground(Text).Bold(true)
+
+	// Select: cyan arrow, white selected, gray others
+	t.Focused.SelectSelector = lipgloss.NewStyle().Foreground(Accent).SetString("▸ ")
+	t.Focused.SelectedOption = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+	t.Focused.UnselectedOption = lipgloss.NewStyle().Foreground(Muted)
+	t.Focused.Option = lipgloss.NewStyle().Foreground(Muted)
+
+	// Scroll indicators
+	t.Focused.NextIndicator = lipgloss.NewStyle().Foreground(Muted).SetString("  ↓")
+	t.Focused.PrevIndicator = lipgloss.NewStyle().Foreground(Muted).SetString("  ↑")
+
+	// Filter input
+	t.Focused.TextInput.Cursor = lipgloss.NewStyle().Foreground(Accent)
+	t.Focused.TextInput.Placeholder = lipgloss.NewStyle().Foreground(Muted)
+	t.Focused.TextInput.Prompt = lipgloss.NewStyle().Foreground(Accent).SetString("/ ")
+	t.Focused.TextInput.Text = lipgloss.NewStyle().Foreground(Text)
+
+	// Buttons
+	t.Focused.FocusedButton = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF")).Background(Accent).Padding(0, 1)
+	t.Focused.BlurredButton = lipgloss.NewStyle().Foreground(Muted).Background(lipgloss.Color("#333")).Padding(0, 1)
+
+	// Blurred = same but no indicators
+	t.Blurred = t.Focused
+	t.Blurred.Base = lipgloss.NewStyle().PaddingLeft(1)
+	t.Blurred.Card = t.Blurred.Base
+	t.Blurred.NextIndicator = lipgloss.NewStyle()
+	t.Blurred.PrevIndicator = lipgloss.NewStyle()
+
+	return t
+}
+
+func selectHeight(count int) int {
+	// Generous height so all items stay visible
+	if count <= 8 {
+		return count + 6
+	}
+	h := count + 5
+	if h > 20 {
+		h = 20
+	}
+	return h
+}
+
 // SelectOption represents a display/value pair for select prompts.
 type SelectOption struct {
 	Display string
 	Value   string
 }
 
-// selectModel is a bubbletea model for native select with filtering.
-type selectModel struct {
-	title       string
-	allOptions  []string
-	options     []string          // filtered options
-	displayMap  map[string]string // for SelectWithOptions
-	cursor      int
-	filter      string
-	selected    string
-	aborted     bool
-	useDisplay  bool
-}
-
-func (m selectModel) Init() tea.Cmd {
-	return nil
-}
-
-func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "esc", "ctrl+c":
-			m.aborted = true
-			return m, tea.Quit
-		case "enter":
-			if len(m.options) > 0 {
-				m.selected = m.options[m.cursor]
-				return m, tea.Quit
-			}
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.cursor < len(m.options)-1 {
-				m.cursor++
-			}
-		case "backspace":
-			if len(m.filter) > 0 {
-				m.filter = m.filter[:len(m.filter)-1]
-				m.applyFilter()
-				m.cursor = 0
-			}
-		default:
-			// Add character to filter
-			if len(msg.String()) == 1 && msg.String() >= " " && msg.String() <= "~" {
-				m.filter += msg.String()
-				m.applyFilter()
-				m.cursor = 0
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m *selectModel) applyFilter() {
-	if m.filter == "" {
-		m.options = m.allOptions
-	} else {
-		m.options = []string{}
-		filter := strings.ToLower(m.filter)
-		for _, opt := range m.allOptions {
-			if strings.Contains(strings.ToLower(opt), filter) {
-				m.options = append(m.options, opt)
-			}
-		}
-	}
-	if m.cursor >= len(m.options) {
-		m.cursor = len(m.options) - 1
-	}
-	if m.cursor < 0 {
-		m.cursor = 0
-	}
-}
-
-func (m selectModel) View() string {
-	if m.aborted {
-		return ""
-	}
-
-	var s strings.Builder
-
-	// Title
-	s.WriteString(TitleStyle.Render("? " + m.title))
-	s.WriteString("\n")
-
-	// Filter bar (if items > 8)
-	if len(m.allOptions) > 8 {
-		filterPrompt := MutedStyle.Render("/ ")
-		s.WriteString(filterPrompt + m.filter + "_\n")
-		s.WriteString("\n")
-	}
-
-	// Options or no results message
-	if len(m.options) == 0 && m.filter != "" {
-		// No results message
-		s.WriteString("\n")
-		s.WriteString(ErrorStyle.Render("  No results for \"" + m.filter + "\""))
-		s.WriteString("\n")
-		s.WriteString(MutedStyle.Render("  (press backspace to clear filter)"))
-	} else {
-		// Display options
-		for i, opt := range m.options {
-			if i == m.cursor {
-				// Selected option
-				s.WriteString(lipgloss.NewStyle().Foreground(Accent).Render("▸ "))
-				s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(opt))
-			} else {
-				// Unselected option
-				s.WriteString("  ")
-				s.WriteString(MutedStyle.Render(opt))
-			}
-			s.WriteString("\n")
-		}
-	}
-
-	// Show count
-	if len(m.allOptions) > 8 {
-		count := fmt.Sprintf("%d/%d", len(m.options), len(m.allOptions))
-		s.WriteString("\n")
-		s.WriteString(MutedStyle.Render(count))
-	}
-
-	return s.String()
-}
-
-// Select displays an interactive selection prompt with filtering and ESC support.
+// Select displays an interactive selection prompt.
+// Lists > 8 items have filtering enabled (type to search).
 func Select(label string, options []string) (string, error) {
-	m := selectModel{
-		title:      label,
-		allOptions: options,
-		options:    options,
-		cursor:     0,
-		filter:     "",
+	var selected string
+
+	huhOptions := make([]huh.Option[string], len(options))
+	for i, opt := range options {
+		huhOptions[i] = huh.NewOption(opt, opt)
 	}
 
-	p := tea.NewProgram(m)
-	finalModel, err := p.Run()
+	sel := huh.NewSelect[string]().
+		Title(label).
+		Options(huhOptions...).
+		Value(&selected).
+		Height(selectHeight(len(options))).
+		Filtering(len(options) > 8)
+
+	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
-		return "", err
-	}
-
-	result := finalModel.(selectModel)
-
-	if result.aborted {
 		return "", ErrUserAbort
 	}
 
-	return result.selected, nil
+	return selected, nil
 }
 
 // SelectWithOptions displays a selection prompt with separate display/value pairs.
 func SelectWithOptions(label string, options []SelectOption) (string, error) {
-	displayMap := make(map[string]string)
-	displays := make([]string, len(options))
+	var selected string
 
+	huhOptions := make([]huh.Option[string], len(options))
 	for i, opt := range options {
-		displays[i] = opt.Display
-		displayMap[opt.Display] = opt.Value
+		huhOptions[i] = huh.NewOption(opt.Display, opt.Value)
 	}
 
-	m := selectModel{
-		title:      label,
-		allOptions: displays,
-		options:    displays,
-		displayMap: displayMap,
-		cursor:     0,
-		filter:     "",
-		useDisplay: true,
-	}
+	sel := huh.NewSelect[string]().
+		Title(label).
+		Options(huhOptions...).
+		Value(&selected).
+		Height(selectHeight(len(options))).
+		Filtering(len(options) > 8)
 
-	p := tea.NewProgram(m)
-	finalModel, err := p.Run()
+	err := huh.NewForm(huh.NewGroup(sel)).WithTheme(devTheme()).Run()
 	if err != nil {
-		return "", err
-	}
-
-	result := finalModel.(selectModel)
-
-	if result.aborted {
 		return "", ErrUserAbort
 	}
 
-	// Return value instead of display
-	if result.useDisplay && len(result.displayMap) > 0 {
-		return result.displayMap[result.selected], nil
+	return selected, nil
+}
+
+// Confirm displays a yes/no prompt.
+func Confirm(label string) (bool, error) {
+	var confirmed bool
+
+	c := huh.NewConfirm().
+		Title(label).
+		Value(&confirmed)
+
+	err := huh.NewForm(huh.NewGroup(c)).WithTheme(devTheme()).Run()
+	if err != nil {
+		return false, ErrUserAbort
 	}
 
-	return result.selected, nil
+	return confirmed, nil
+}
+
+// Input displays a text input prompt.
+func Input(label, placeholder string) (string, error) {
+	var value string
+
+	i := huh.NewInput().
+		Title(label).
+		Placeholder(placeholder).
+		Value(&value)
+
+	err := huh.NewForm(huh.NewGroup(i)).WithTheme(devTheme()).Run()
+	if err != nil {
+		return "", ErrUserAbort
+	}
+
+	return value, nil
 }
 
 const bannerArt = `
@@ -288,6 +229,7 @@ func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, er
 	var result *UpdateResult
 
 	if checkFn != nil {
+		// Show discreet loading indicator
 		fmt.Printf("%s  %s", versionText, MutedStyle.Render("⟳"))
 
 		type checkResult struct {
@@ -308,6 +250,7 @@ func PrintBannerWithUpdateCheck(version string, checkFn func() (string, bool, er
 			cr = checkResult{err: fmt.Errorf("timeout")}
 		}
 
+		// Clear line, reprint with status
 		fmt.Print("\r\033[K")
 
 		if cr.err != nil {
@@ -357,37 +300,4 @@ func PrintInfo(title, content string) {
 	header := TitleStyle.Render(title)
 	body := BoxStyle.Render(content)
 	fmt.Printf("%s\n%s\n", header, body)
-}
-
-// Confirm displays a yes/no prompt (using huh).
-func Confirm(label string) (bool, error) {
-	var confirmed bool
-
-	c := huh.NewConfirm().
-		Title(label).
-		Value(&confirmed)
-
-	err := huh.NewForm(huh.NewGroup(c)).Run()
-	if err != nil {
-		return false, ErrUserAbort
-	}
-
-	return confirmed, nil
-}
-
-// Input displays a text input prompt (using huh).
-func Input(label, placeholder string) (string, error) {
-	var value string
-
-	i := huh.NewInput().
-		Title(label).
-		Placeholder(placeholder).
-		Value(&value)
-
-	err := huh.NewForm(huh.NewGroup(i)).Run()
-	if err != nil {
-		return "", ErrUserAbort
-	}
-
-	return value, nil
 }
