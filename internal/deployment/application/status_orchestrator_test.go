@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/20uf/devcli/internal/deployment/domain"
-	"github.com/20uf/devcli/internal/deployment/infra"
 )
 
 // Mock tracker for testing
@@ -64,8 +63,9 @@ func (m *mockTracker) Cleanup(ctx context.Context, maxAge int64) (int, error) {
 // Mock run repository for testing
 type mockRunRepo struct{}
 
-func (m *mockRunRepo) CreateRun(ctx context.Context, deployment domain.Deployment) (domain.Run, error) {
-	return domain.NewRun("run-1", 1, domain.RunStatusQueued, "main", "https://github.com"), nil
+func (m *mockRunRepo) CreateRun(ctx context.Context, deployment domain.Deployment) (*domain.Run, error) {
+	run := domain.NewRun("run-1", 1, domain.RunStatusQueued, "main", "https://github.com")
+	return &run, nil
 }
 
 func (m *mockRunRepo) GetRun(ctx context.Context, runID string) (*domain.Run, error) {
@@ -161,7 +161,7 @@ func TestStatusOrchestrator_ListActive(t *testing.T) {
 
 	// Track and complete one deployment
 	td1, _ := orchestrator.TrackDeployment(ctx, "run-1", workflow, "main", "owner/repo")
-	td2, _ := orchestrator.TrackDeployment(ctx, "run-2", workflow, "develop", "owner/repo")
+	_, _ = orchestrator.TrackDeployment(ctx, "run-2", workflow, "develop", "owner/repo")
 
 	// Complete one
 	td1.UpdateConclusion(domain.RunConclusionSuccess)

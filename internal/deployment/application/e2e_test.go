@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	connDomain "github.com/20uf/devcli/internal/connection/domain"
 	"github.com/20uf/devcli/internal/deployment/domain"
 	"github.com/20uf/devcli/internal/deployment/infra"
 )
@@ -66,8 +67,9 @@ func TestE2E_DeployWithTypedInputs(t *testing.T) {
 	t.Logf("Selected branch: %s", branch)
 
 	// Step 5: Trigger deployment
+	wfName := workflow.Name()
 	deployment, err := orchestrator.Trigger(ctx, TriggerRequest{
-		WorkflowName: &workflow.Name(),
+		WorkflowName: &wfName,
 		BranchName:   &branch,
 		Inputs:       inputMap,
 		RepoURL:      "owner/repo",
@@ -75,11 +77,6 @@ func TestE2E_DeployWithTypedInputs(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("Failed to trigger deployment: %v", err)
-	}
-
-	// Verify: Deployment created
-	if deployment == nil {
-		t.Errorf("Deployment should not be nil")
 	}
 
 	if !deployment.HasRun() {
@@ -187,12 +184,23 @@ func TestE2E_DeployThenTrack(t *testing.T) {
 
 	inputMap := make(map[string]string)
 	for _, inp := range inputs {
-		inputMap[inp.Key()] = "test"
+		switch inp.Type() {
+		case domain.InputTypeChoice:
+			if len(inp.Options()) > 0 {
+				inputMap[inp.Key()] = inp.Options()[0]
+			}
+		case domain.InputTypeBoolean:
+			inputMap[inp.Key()] = "false"
+		default:
+			inputMap[inp.Key()] = "test"
+		}
 	}
 
+	wfName := workflowList[0].Name()
+	brName := branchList[0]
 	deployment, err := deployOrch.Trigger(ctx, TriggerRequest{
-		WorkflowName: &workflowList[0].Name(),
-		BranchName:   &branchList[0],
+		WorkflowName: &wfName,
+		BranchName:   &brName,
 		Inputs:       inputMap,
 		RepoURL:      "owner/repo",
 	})
@@ -238,13 +246,11 @@ func TestE2E_DeployThenTrack(t *testing.T) {
 
 // E2E: Connection context flow
 func TestE2E_ConnectContext(t *testing.T) {
-	ctx := context.Background()
-
 	// This test validates the connection context works end-to-end
 	// (Uses existing ConnectOrchestrator from connection package)
 
 	// Just verify the connection domain is available
-	cluster, _ := domain.NewCluster("production")
+	cluster, _ := connDomain.NewCluster("production")
 	if cluster.Name() != "production" {
 		t.Errorf("Cluster creation failed")
 	}
@@ -254,8 +260,6 @@ func TestE2E_ConnectContext(t *testing.T) {
 
 // E2E: Error handling and edge cases
 func TestE2E_ErrorHandling(t *testing.T) {
-	ctx := context.Background()
-
 	tests := []struct {
 		name      string
 		testFunc  func() error
@@ -272,7 +276,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 		{
 			name: "Invalid cluster name",
 			testFunc: func() error {
-				_, err := domain.NewCluster("")
+				_, err := connDomain.NewCluster("")
 				return err
 			},
 			shouldErr: true,

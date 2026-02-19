@@ -46,7 +46,7 @@ func TestDeployHandler_NonInteractive_AllFlags(t *testing.T) {
 	inputFlags := []string{"environment=prod", "skip_tests=true"}
 	watchFlag := false
 
-	err = handler.Handle(cmd, workflowFlag, branchFlag, inputFlags, watchFlag)
+	err = handler.Handle(cmd, workflowFlag, branchFlag, inputFlags, watchFlag, "owner/repo")
 
 	// Should process without UI prompts
 	// May fail due to GitHub API but shouldn't be UI-related
@@ -254,11 +254,13 @@ func TestDeployHandler_StringInput(t *testing.T) {
 
 // Test: Required input enforcement
 func TestDeployHandler_RequiredInput(t *testing.T) {
-	// Required inputs must be provided
-	input, err := domain.NewChoiceInput("environment", "", []string{"dev", "prod"}, true)
-
-	if err == nil {
-		t.Errorf("Expected error for required input with empty value")
+	// Required choice input with empty value is valid at creation (validated at submit)
+	input1, err := domain.NewChoiceInput("environment", "", []string{"dev", "prod"}, true)
+	if err != nil {
+		t.Errorf("NewChoiceInput with empty value should succeed: %v", err)
+	}
+	if !input1.IsRequired() {
+		t.Errorf("Input should be marked as required")
 	}
 
 	// Optional inputs can be empty
@@ -284,7 +286,7 @@ func TestDeployHandler_ExecuteDeployment(t *testing.T) {
 
 	// Create a deployment
 	workflow, _ := domain.NewWorkflow("deploy.yml")
-	deployment := domain.NewDeployment(workflow, "main")
+	deployment, _ := domain.NewDeployment("test-1", workflow, "main", "owner/repo")
 
 	// Execute (with mocks, should not error on GitHub)
 	err = handler.executeDeployment(context.Background(), deployment, false)
@@ -324,7 +326,7 @@ func TestDeployHandler_WatchFlag(t *testing.T) {
 	testCases := []bool{true, false}
 
 	for _, watchFlag := range testCases {
-		err := handler.Handle(cmd, "deploy.yml", "main", []string{}, watchFlag)
+		err := handler.Handle(cmd, "deploy.yml", "main", []string{}, watchFlag, "owner/repo")
 		// May fail due to GitHub API, but watch flag should be processed
 		_ = err
 	}
@@ -343,7 +345,7 @@ func TestDeployHandler_InteractiveFlow(t *testing.T) {
 	cmd.SetContext(context.Background())
 
 	// No workflow flag → forces interactive selection
-	err = handler.Handle(cmd, "", "", []string{}, false)
+	err = handler.Handle(cmd, "", "", []string{}, false, "owner/repo")
 
 	// Should initiate interactive flow (would prompt in real use)
 	t.Log("✓ Interactive flow initiated")

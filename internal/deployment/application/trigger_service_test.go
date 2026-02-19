@@ -40,10 +40,10 @@ type MockRunRepository struct {
 	err  error
 }
 
-func (m *MockRunRepository) CreateRun(ctx context.Context, deployment domain.Deployment) (domain.Run, error) {
+func (m *MockRunRepository) CreateRun(ctx context.Context, deployment domain.Deployment) (*domain.Run, error) {
 	run := domain.NewRun("run-123", 42, domain.RunStatusQueued, deployment.Branch(), "https://github.com/example")
 	m.runs["run-123"] = run
-	return run, m.err
+	return &run, m.err
 }
 
 func (m *MockRunRepository) GetRun(ctx context.Context, runID string) (*domain.Run, error) {

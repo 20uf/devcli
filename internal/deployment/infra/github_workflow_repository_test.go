@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/20uf/devcli/internal/deployment/domain"
-	"github.com/20uf/devcli/internal/verbose"
 )
 
 // Test helpers
